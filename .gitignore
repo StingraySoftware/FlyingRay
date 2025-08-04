@@ -1,0 +1,42 @@
+# --- Python ---
+# Compiled Python files and caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Egg and distribution files
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# --- Virtual Environments ---
+# Common names for virtual environments
+venv/
+.venv/
+env/
+.env/
+*env.bak
+env.bak
+
+# --- Data & Output Files ---
+# Ignore the entire data directory and any specific data files.
+# Data should not be stored in Git.
+data/
+*.h5
+*.fits
+*.evt
+
+# --- IDE & Editor Config ---
+# VSCode
+.vscode/
+# PyCharm
+.idea/
+
+# --- Operating System Files ---
+# macOS
+.DS_Store
+# Windows
+Thumbs.db
