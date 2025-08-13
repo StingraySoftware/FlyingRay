@@ -1,4 +1,3 @@
-
 import os
 import re
 import shutil
@@ -439,7 +438,6 @@ def retrieve_and_process_data(
 ):
 
     cwd = os.getcwd()
-    # ▼▼▼ ADD THIS 'try' LINE ▼▼▼
     try:
         processing = MISSION_CONFIG[mission]["obsid_processing"]
         links = Heasarc.locate_data(result_table, catalog_name=MISSION_CONFIG[mission]["table"])
@@ -477,9 +475,8 @@ def retrieve_and_process_data(
                 wait_for=[recursive_download],
                 return_state=True,
             )
-    # ▼▼▼ ADD THIS 'finally' BLOCK TO FIX THE PROBLEM ▼▼▼
     finally:
-        os.chdir(cwd) # This guarantees the directory is changed back
+        os.chdir(cwd)
 
     return result_table
 
@@ -554,3 +551,4 @@ def retrieve_heasarc_data_by_obsid(
         wait_for=[retrieve_info_for_obsid],
     )
     return results
+

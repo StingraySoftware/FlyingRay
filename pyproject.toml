@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.2", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flyingray"
+version = "0.1.0"
+description = "####"
+readme = "README.rst"
+requires-python = ">=3.9"
+authors = [
+  { name = "Mohammad Adnan", email = "adnanmohammad6002@gmail.com" },
+]
+dependencies = [
+    "matplotlib",
+    "astropy<7.0",
+    "numpy",
+    "astroquery",
+    "pytest",
+    "prefect",
+    "pysmartdl",
+    "scikit-image",
+    "scipy",
+    "statsmodels",
+    "beautifulsoup4",
+    "boto3",
+    "panel",
+    "stingray",
+    "h5py",
+    "pandas",
+    "plotly",
+    "Pillow",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

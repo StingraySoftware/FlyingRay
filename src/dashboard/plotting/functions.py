@@ -1,3 +1,4 @@
+
 import panel as pn
 import param
 import h5py
@@ -7,19 +8,24 @@ import os
 import plotly.express as px
 import numpy as np
 from PIL import Image
-import logging 
+import logging # IMPORT THE LOGGING MODULE
 import glob
-
+from matplotlib.ticker import MaxNLocator
 logger = logging.getLogger(__name__) # INITIALIZE LOGGER
 
 class HIDPlotter(param.Parameterized):
     h5_file_path = param.String(default="", doc="Path to the HDF5 file.")
     hid_df = param.DataFrame(default=pd.DataFrame(), allow_None=True)
 
-    def __init__(self, **params):
+    def __init__(self, hid_df=None, **params):
         super().__init__(**params)
-        self.hid_df = self.get_hid_data(self.h5_file_path)
-
+        if hid_df is not None:
+            logger.info(f"--> HIDPlotter __init__: Using provided dataframe with {hid_df.shape[0]} rows.")
+            self.hid_df = hid_df
+        else:
+            logger.info("--> HIDPlotter __init__: No dataframe provided, loading from file.")
+            self.hid_df = self.get_hid_data(self.h5_file_path)
+        
     @staticmethod
     def get_hid_data(h5_file_path):
         if not (h5_file_path and os.path.exists(h5_file_path)):
@@ -57,18 +63,42 @@ class HIDPlotter(param.Parameterized):
             logger.error(f"Error in get_hid_data for {h5_file_path}: {e}", exc_info=True) # Use logger with exc_info
             return None
 
+# In your plotting.py file, inside the HIDPlotter class:
+
+    # ... (after the get_pds_png method) ...
 
     @staticmethod
-    def get_lightcurve_png(h5_file_path, obs_id, band):
+    def get_all_lightcurve_pngs(h5_file_path, obs_id):
+        """
+        Scans the HDF5 file and retrieves all light curve plots for a given ObsID.
+        Returns a dictionary where keys are clean titles and values are PNG data.
+        """
+        lc_plots = {}
         try:
             with h5py.File(h5_file_path, 'r') as hdf:
-                dataset_path = f"{obs_id}/lightcurve_{band}"
-                if dataset_path in hdf:
-                    return hdf[dataset_path][()]
+                obs_group = hdf.get(obs_id)
+                if not obs_group:
+                    logger.warning(f"No group found for ObsID {obs_id} in {h5_file_path}")
+                    return {}
+                
+                # Loop through all datasets in the observation's group
+                for item_name in obs_group:
+                    # Check if the dataset name indicates it's a light curve plot
+                    if item_name.startswith("lightcurve_"):
+                        png_data = obs_group[item_name][()]
+                        
+                        # Create a clean title for the plot from the dataset name
+                        # e.g., "lightcurve_0.4-12_keV_part1" becomes "0.4-12 keV part1"
+                        clean_title = item_name.replace("lightcurve_", "").replace("_", " ")
+                        lc_plots[clean_title] = png_data
         except Exception as e:
-            logger.error(f"Error getting {band} lightcurve for {obs_id}: {e}", exc_info=True) # Use logger
-        return None
+            logger.error(f"Error getting all lightcurves for {obs_id}: {e}", exc_info=True)
+        
+        return lc_plots
 
+
+
+    # MODIFIED: Retrieve PDS PNG from HDF5
     @staticmethod
     def get_pds_png(h5_file_path, obs_id):
         try:
@@ -82,6 +112,7 @@ class HIDPlotter(param.Parameterized):
 
 
 
+    # NEW METHOD: Retrieve PDS attributes from HDF5
     @staticmethod
     def get_pds_attributes(h5_file_path, obs_id):
         try:
@@ -96,25 +127,28 @@ class HIDPlotter(param.Parameterized):
 
 
     @param.depends('hid_df')
-    def hid_plot(self, yscale='log'):
-        if self.hid_df is None or self.hid_df.empty:
+    def hid_plot(self, yscale='log', hid_df=None):
+        data_to_plot = self.hid_df if hid_df is None else hid_df
+
+        if data_to_plot is None or data_to_plot.empty:
             return pn.pane.Markdown("### No valid data to plot.", width=450, height=400, align='center')
+            
+        data_to_plot['Outburst'] = data_to_plot['Outburst'].astype('category')
 
         fig = px.scatter(
-            self.hid_df,
+            data_to_plot,
             x='Hardness_Ratio',
             y='Normalized_Intensity',
             color='Outburst',
             color_continuous_scale='Viridis',
             hover_name='ObsID',
-            title=f"Hardness-Normalized Intensity Diagram: {self.name}",
             labels={'Hardness_Ratio': 'Hardness Ratio (4-12 keV / 2-4 keV)',
                     'Normalized_Intensity': 'Normalized Intensity (0.4-12 keV) [cts/s/detector]'}
         )
         fig.update_yaxes(type=yscale)
 
         fig.update_traces(
-            customdata=self.hid_df[['ObsID', 'Outburst', 'Hardness_Ratio', 'Intensity', 'No_of_detectors', 'Normalized_Intensity']],
+            customdata=data_to_plot[['ObsID', 'Outburst', 'Hardness_Ratio', 'Intensity', 'No_of_detectors', 'Normalized_Intensity']],
             marker=dict(size=8, line=dict(width=1, color='white')),
             hovertemplate=(
                 "<b>ObsID:</b> %{customdata[0]}<br>"
@@ -137,6 +171,8 @@ class HIDPlotter(param.Parameterized):
 
         return plotly_pane
 
+# Replace the old get_global_hid_data function in plotting.py with this one:
+
 def get_global_hid_data(selected_sources, main_data_dir):
     """
     Aggregates HID data from multiple HDF5 files into a single DataFrame.
@@ -146,7 +182,7 @@ def get_global_hid_data(selected_sources, main_data_dir):
         search_pattern = os.path.join(main_data_dir, '**', f"{source_name.replace(' ', '_')}.h5")
         found_files = glob.glob(search_pattern, recursive=True)
 
-   
+        # --- THIS IS THE FIX ---
         # 1. Check if the LIST is empty, not if the list "exists".
         # 2. If files were found, take the FIRST element from the list.
         if not found_files:
@@ -191,13 +227,15 @@ def create_global_hid_plot(global_df):
         title="Global Hardness-Intensity Diagram"
     )
 
+    # --- NEW: Manually set the legend group and name for each trace ---
+    # This correctly groups all outbursts under a single source name in the legend.
     for trace in fig.data:
         # Get the source name from the custom data associated with the trace
         source_name = trace.customdata[0][1]
         trace.name = source_name
         trace.legendgroup = source_name
 
-  
+    # --- Clean up the legend to show each source name only once ---
     legend_names = set()
     fig.for_each_trace(
         lambda trace:
@@ -206,6 +244,7 @@ def create_global_hid_plot(global_df):
             else legend_names.add(trace.name)
     )
 
+    # Update hover template and set a uniform marker size
     fig.update_traces(
         hovertemplate=(
             "<b>Source:</b> %{customdata[1]}<br>"
@@ -221,6 +260,7 @@ def create_global_hid_plot(global_df):
         )
     )
 
+    # Final layout adjustments
     fig.update_layout(
         height=700,
         legend_title_text='Sources',

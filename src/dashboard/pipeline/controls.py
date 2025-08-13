@@ -12,10 +12,12 @@ import h5py
 from astroquery.heasarc import Heasarc
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
+from astropy.coordinates.name_resolve import NameResolveError
+
 
 
 from heasarc_retrieve_pipeline.core import retrieve_heasarc_data_by_obsid
-from h5 import process_observation, create_h5_generator_tab
+from dashboard.HDF5.h5 import process_observation, create_h5_generator_tab
 
 TEST_MODE = True
 
@@ -103,11 +105,7 @@ def retrieve_heasarc_data_by_obsid_wrapper(source: str, obsid: str, base_outdir:
     """
     obs_dir = os.path.join(base_outdir, obsid)
     abs_obs_dir = os.path.abspath(obs_dir)
-
-    done_file = os.path.join(abs_obs_dir, "PIPELINE_DONE.TXT")
-    if os.path.exists(done_file):
-        logger.info(f"PIPELINE_DONE.TXT found for {obsid}. Skipping.")
-        return abs_obs_dir
+    done_file = os.path.join(abs_obs_dir, '**', '*_cl_bary.evt')
 
     logger.info(f"Starting REAL processing for OBSID: {obsid} with flags: {flags}")
     retrieve_heasarc_data_by_obsid(
@@ -130,47 +128,20 @@ def retrieve_heasarc_data_by_obsid_wrapper(source: str, obsid: str, base_outdir:
     return abs_obs_dir
 
 def get_obsids_from_heasarc_direct(source_name: str, mission: str):
-    """
-    Queries HEASARC for a given source and groups its observations into outbursts.
 
-    Performs a region-based query on the appropriate mission table in the HEASARC
-    database. It then processes the observation times to identify and number distinct
-    outburst periods based on a 6-month (182.5 day) gap threshold between observations.
-
-    Args:
-        source_name (str): The name of the source to query (e.g., 'IGR J17091-3624').
-        mission (str): The name of the mission catalog to search (e.g., 'nicer', 'rxte').
-
-    Returns:
-        pd.DataFrame: A pandas DataFrame containing the observation list, sorted by
-                      time, with an added 'OUTBURST_ID' column. Returns an empty
-                      DataFrame if the query fails or no observations are found.
-    
-    Exceptions:
-        Logs an error if the HEASARC query or data processing fails, then returns
-        an empty DataFrame.
-    """
-    try:
         heasarc = Heasarc()
         mission_info = MISSION_INFO[mission]
         table_name = mission_info["table"]
         
         position = SkyCoord.from_name(source_name)
-        result_table = heasarc.query_region(position, catalog=table_name, radius='30 arcmin')
+        result_table = heasarc.query_region(position, catalog=table_name, radius='90 arcmin')
         if result_table is None: return pd.DataFrame()
         
         df = result_table.to_pandas()
 
-
+        # 1. Normalize all column names to lowercase to prevent case-sensitivity issues.
         df.columns = [col.lower() for col in df.columns]
 
-    
-        if mission == 'nustar' and 'observation_mode' in df.columns:
-             df = df[df['observation_mode'] == 'science'].copy()
-        
-        if df.empty:
-            logger.warning(f"No valid 'SCIENCE' observations found for {source_name} with {mission}.")
-            return pd.DataFrame()
         
         # 3. Determine the name of the stop time column we will create or use.
         # For RXTE, we calculate 'stop_time'; for others, we look for 'end_time'.
@@ -185,17 +156,22 @@ def get_obsids_from_heasarc_direct(source_name: str, mission: str):
                 logger.info("RXTE: Calculating precise stop time from 'duration'.")
                 df[stop_time_column] = df['time'] + (pd.to_numeric(df['duration'], errors='coerce') / 86400.0)
             
-            elif 'exposure' in df.columns:
+            elif 'exposure' in df.columns: 
                 # Approximate fallback for NICER/NuSTAR if 'end_time' is missing
                 logger.warning(f"'{stop_time_column}' not found. Falling back to APPROXIMATE calculation from 'exposure'.")
                 df[stop_time_column] = df['time'] + (pd.to_numeric(df['exposure'], errors='coerce') / 86400.0)
+
+            elif 'exposure_a' in df.columns:
+              # Approximate fallback for NICER/NuSTAR if 'end_time' is missing
+              logger.warning(f"'{stop_time_column}' not found. Falling back to APPROXIMATE calculation from 'exposure_a'.")
+              df[stop_time_column] = df['time'] + (pd.to_numeric(df['exposure_a'], errors='coerce') / 86400.0)
             
             else:
-                # If we cannot calculate a stop time at all, exit .
+                # If we cannot calculate a stop time at all, exit gracefully.
                 logger.error(f"Cannot determine stop time: Missing '{stop_time_column}', 'duration', and 'exposure' columns.")
                 return pd.DataFrame()
 
-  
+        # 5. Final data cleaning before use.
         df.dropna(subset=['time', stop_time_column], inplace=True)
         df['obsid'] = df['obsid'].astype(str)
         df["date"] = Time(df["time"], format="mjd").to_datetime()
@@ -203,10 +179,10 @@ def get_obsids_from_heasarc_direct(source_name: str, mission: str):
 
         if df_sorted.empty: return pd.DataFrame()
 
-     
+        # This list comprehension is now protected by the checks above.
         observation_times = [(row['obsid'], row['time'], row[stop_time_column]) for _, row in df_sorted.iterrows()]
         
-    
+        # ... (Rest of your outburst grouping logic is unchanged)
         outbursts, outburst_mapping = [], {}
         if observation_times:
             current_outburst = [observation_times[0]]
@@ -229,9 +205,6 @@ def get_obsids_from_heasarc_direct(source_name: str, mission: str):
             
         return output_df
         
-    except Exception as e:
-        logger.error(f"Failed to group OBSIDs for '{source_name}': {e}", exc_info=True)
-        return pd.DataFrame()
         
 def heasarc_pipeline_runner(source: str, obsids: list, base_outdir: str, mission: str, hdf5_file_path: str, status_pane, outburst_mapping: dict, custom_flags: dict = None):
     """
@@ -301,7 +274,8 @@ def heasarc_pipeline_runner(source: str, obsids: list, base_outdir: str, mission
             logger.info(f"Appending data from {obsid} (Outburst {outburst_id}) to {hdf5_file_path}")
             
             # Pass the outburst ID to the processing function
-            asyncio.run(process_observation(evt_file_path, hdf5_file_path, outburst_id))
+            asyncio.run(process_observation(evt_file_path, hdf5_file_path, outburst_id, mission))
+
 
             if not TEST_MODE:
                 shutil.rmtree(obs_dir_path)
@@ -315,6 +289,7 @@ def heasarc_pipeline_runner(source: str, obsids: list, base_outdir: str, mission
     logger.info("PIPELINE COMPLETED.")
     status_pane.object = f"**Pipeline Finished.** HDF5 file updated at: {hdf5_file_path}"
     pn.state.cache['latest_h5_file'] = hdf5_file_path
+
 
 
 def update_local_source_list(mission, local_widget, select_all_sources_checkbox):
@@ -337,15 +312,15 @@ def update_local_source_list(mission, local_widget, select_all_sources_checkbox)
         - Modifies the `.options`, `.disabled`, and `.name` attributes of the `local_widget`.
         - Modifies the `.disabled` and `.value` attributes of the `select_all_sources_checkbox`.
     """
-
+    # --- RESET WIDGETS ---
     print(f"DEBUG: Searching for local data from CWD: {os.getcwd()}")
     local_widget.options = []
     local_widget.disabled = True
     select_all_sources_checkbox.disabled = True
     select_all_sources_checkbox.value = False
 
-    #main_data_dir = "data"
-    main_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    main_data_dir = "data"
+    #main_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
     source_list = []
     mission_dir = os.path.join(main_data_dir, mission)
 
@@ -362,7 +337,7 @@ def update_local_source_list(mission, local_widget, select_all_sources_checkbox)
         local_widget.options = source_list
         local_widget.name = f"Select Processed Source(s) ({len(source_list)} found)"
         local_widget.disabled = False
-
+        # --- ENABLE THE CHECKBOX ---
         select_all_sources_checkbox.disabled = False
     else:
         local_widget.name = "No local data found"
@@ -398,12 +373,12 @@ def load_local_source_data(event, outburst_widget, obsid_widget, name_widget, te
     Restrictions:
         - The function will only proceed if exactly one source is selected.
     """
-  
+    # --- 1. Clear local widgets when the source changes ---
     outburst_widget.options, outburst_widget.value = [], []
     obsid_widget.options, obsid_widget.value = [], []
     outburst_widget.disabled, obsid_widget.disabled = True, True
     
-
+    # -- ADDED -- Reset checkbox state
     select_all_checkbox.disabled = True
     select_all_checkbox.value = False
     
@@ -411,21 +386,23 @@ def load_local_source_data(event, outburst_widget, obsid_widget, name_widget, te
     
     # Only proceed if a single source is selected
     if len(event.new) > 1:
-        outburst_widget.name = " Select only one source to see the obseravtions."
+        outburst_widget.name = " Select only ONE source."
         return
     if not event.new:
         outburst_widget.name = "Select Outburst(s)"
         return
 
-    
+    # --- 2. Prepare to read the selected file ---
     outburst_widget.name = "Select Outburst(s)"
     selected_source = event.new[0]
     mission = tels_name_widget.value
     #h5_path = os.path.join("data", mission, f"{selected_source}.h5")
-    h5_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", mission, f"{selected_source}.h5")
+    #h5_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", mission, f"{selected_source}.h5")
+    # The corrected, simple line
+    h5_path = os.path.join("data", mission, f"{selected_source}.h5")
 
     if os.path.exists(h5_path):
-        name_widget.value = selected_source
+        #name_widget.value = selected_source
         
         with h5py.File(h5_path, 'r') as hdf:
             if 'hid/hid_table' not in hdf:
@@ -433,7 +410,7 @@ def load_local_source_data(event, outburst_widget, obsid_widget, name_widget, te
                 outburst_widget.name = "Error: H5 table not found."
                 return
             
-    
+            # --- 3. Read and CLEAN data ---
             csv_bytes = hdf['hid/hid_table'][0]
             csv_str = csv_bytes.decode('utf-8')
             hid_df = pd.read_csv(pd.io.common.StringIO(csv_str))
@@ -445,13 +422,14 @@ def load_local_source_data(event, outburst_widget, obsid_widget, name_widget, te
 
             hid_df['Outburst'] = hid_df['Outburst'].astype('int64')
 
+            # --- 4. Populate the UI with the CLEANED data ---
             pn.state.cache['local_hid_df'] = hid_df
             
             outbursts = sorted(hid_df['Outburst'].unique().tolist())
             outburst_widget.options = [f"Outburst {o}" for o in outbursts]
             outburst_widget.disabled = False
             
-
+            # -- ADDED -- Enable the checkbox
             select_all_checkbox.disabled = False
             
             obsid_options = {
@@ -507,7 +485,8 @@ def filter_obsids_by_outburst(event, obsid_widget, cache_key, outburst_col_name,
     obsid_widget.value = selected_rows[obsid_col_name].astype(str).tolist()
 
     
-def create_pipeline_runner_tab(status_pane):
+#def create_pipeline_runner_tab(status_pane):
+def create_pipeline_runner_tab(status_pane, plot_local_hids_callback, plot_global_hid_callback):
     """
     Creates the main UI tab for the data processing and visualization pipeline.
 
@@ -528,7 +507,7 @@ def create_pipeline_runner_tab(status_pane):
           the main display area for plots and results.
     """
 
-
+        # --- Define CSS Styles ---
     input_style = """
     /* This styles the input box itself */
     :host .bk-input {
@@ -564,22 +543,19 @@ def create_pipeline_runner_tab(status_pane):
 
  
     # --- Widget Definitions ---
-   # heading1 = pn.pane.Markdown("### **Select Telescope**")
-    tels_name = pn.widgets.Select(name="Select Telescope", options=['nicer', 'nustar', 'rxte'], sizing_mode='stretch_width', height=60 , stylesheets=[input_style])
-    
+    tels_name = pn.widgets.Select(name="Select Telescope", options=['nicer', 'nustar', 'rxte'], sizing_mode='stretch_width', height=60 , stylesheets=[input_style])  
     heasarc_heading = pn.pane.Markdown("### Data available on HEASARC")
     source_name = pn.widgets.TextInput(name="Enter Source Name", placeholder='e.g., IGR J17091-3624', sizing_mode='stretch_width', height=60 , stylesheets=[input_style])
     fetch_obsids_button = pn.widgets.Button(name="Fetch Available OBSID's", button_type="default", sizing_mode='stretch_width', stylesheets=[secondary_button_style])
     outburst_summary_pane = pn.pane.Markdown("")
     outburst_select = pn.widgets.MultiSelect(name="Select Whole Outburst(s)", disabled=True, sizing_mode='stretch_width', height=70, stylesheets=[input_style])
-    #heading3 = pn.pane.Markdown("### **Available Observations**")
     multi_obsid_select = pn.widgets.MultiSelect( disabled=True, sizing_mode='stretch_width', height=180, stylesheets=[input_style])
 
 
     local_db_heading = pn.pane.Markdown("### Local Database")
     local_source_select = pn.widgets.MultiSelect(name="Select Processed Source(s)", disabled=True, sizing_mode='stretch_width', height=150, stylesheets=[input_style])
     select_all_sources_checkbox = pn.widgets.Checkbox(name="Select All Sources", value=False, disabled=True)
-
+    
     plot_hid_button = pn.widgets.Button(name="Plot HID", button_type="default", disabled=True, sizing_mode='stretch_width', stylesheets=[secondary_button_style])
     plot_global_hid_button = pn.widgets.Button(name="Plot Global HID", button_type="default", disabled=True, sizing_mode='stretch_width', stylesheets=[secondary_button_style])
 
@@ -592,9 +568,10 @@ def create_pipeline_runner_tab(status_pane):
 
 
     #_, _, plot_local_hids_callback, plot_global_hid_callback = create_h5_generator_tab(tels_name)
-    header_card, plots_and_details, plot_local_hids_callback, plot_global_hid_callback = create_h5_generator_tab(tels_name)
-    plots_display_area = plots_and_details[0]
+  #  header_card, plots_and_details, plot_local_hids_callback, plot_global_hid_callback = create_h5_generator_tab(tels_name)
+   # plots_display_area = plots_and_details[0]
 
+    # --- Callbacks ---
     async def fetch_obsids_callback(event):
         """Callback to fetch and display observation data from HEASARC."""
         fetch_obsids_button.loading = True
@@ -617,8 +594,16 @@ def create_pipeline_runner_tab(status_pane):
             outburst_options = [f"Outburst {i}" for i in range(1, int(num_outbursts) + 1)]
             outburst_select.options, outburst_select.disabled = outburst_options, False
             status_pane.object = "Status: Ready to run pipeline."
-        except Exception as e:
-            status_pane.object = f"Error: {e}"
+            
+        except NameResolveError:
+            error_message = (
+            f"The name '{source_name.value}' is incorrect or could not be found for {tels_name.value}.<br>"
+            "Please enter the correct source name."
+        )
+            status_pane.object = error_message
+            multi_obsid_select.name, multi_obsid_select.options = "Enter a valid source name.", []
+            run_button.disabled, outburst_select.disabled, outburst_summary_pane.object = True, True, ""
+            
         finally:
             fetch_obsids_button.loading = False
 
@@ -627,8 +612,8 @@ def create_pipeline_runner_tab(status_pane):
         status_pane.object = "Status: Pipeline is starting..."
         try:
             heasarc_obsids = set(multi_obsid_select.value)
-            local_obsids = set(local_obsid_select.value)
-            selected_obsids = list(heasarc_obsids.union(local_obsids))
+            #local_obsids = set(local_obsid_select.value)
+            selected_obsids = list(heasarc_obsids)
             
             raw_source_name = source_name.value
             base_outdir = raw_source_name.replace(" ", "_")
@@ -719,6 +704,7 @@ def create_pipeline_runner_tab(status_pane):
         plot_global_hid_callback(event, selected_sources)
         
 
+    # --- NEW FUNCTION TO MANAGE BUTTON STATE ---
     def update_plot_button_state(event):
         """Enables or disables plotting buttons based on source selection."""
         # event.new is the list of selected sources
@@ -740,6 +726,7 @@ def create_pipeline_runner_tab(status_pane):
         else:
             local_outburst_select.value = []
 
+    # --- Layout Construction ---
     left_column = pn.Column(
         heasarc_heading,
         source_name,
@@ -749,6 +736,7 @@ def create_pipeline_runner_tab(status_pane):
         multi_obsid_select, custom_flags_input, run_button
     )
     
+    # --- 3. ADD BUTTONS TO THE LAYOUT ---
     plot_button_row = pn.Row(plot_hid_button, plot_global_hid_button)
     
     right_column = pn.Column(
@@ -758,7 +746,7 @@ def create_pipeline_runner_tab(status_pane):
         select_all_outbursts_checkbox,
         local_obsid_select,
         select_all_sources_checkbox,
-        plot_button_row,  
+        plot_button_row,  # <-- ADDED BUTTON ROW
         
     )
     divided_layout = pn.Row(left_column, right_column)
@@ -766,7 +754,7 @@ def create_pipeline_runner_tab(status_pane):
          tels_name, divided_layout
     )
     
-    #  CONNECT EVERYTHING
+    # --- 4. CONNECT EVERYTHING ---
     fetch_obsids_button.on_click(fetch_obsids_callback)
     
     outburst_select.param.watch(
@@ -801,16 +789,13 @@ def create_pipeline_runner_tab(status_pane):
     select_all_sources_checkbox.param.watch(toggle_all_sources, 'value')
     select_all_outbursts_checkbox.param.watch(toggle_all_outbursts, 'value')
 
+    # --- CONNECT NEW BUTTONS AND STATE MANAGER ---
     plot_hid_button.on_click(on_plot_hid_click)
     plot_global_hid_button.on_click(on_plot_global_hid_click)
     local_source_select.param.watch(update_plot_button_state, 'value')
     
     update_local_source_list(tels_name.value, local_source_select, select_all_sources_checkbox)
     
-
-    return controls, plots_and_details
-
-
-
-
-
+   # return controls
+    #return controls, plots_and_details
+    return controls, tels_name
