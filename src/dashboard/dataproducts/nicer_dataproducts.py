@@ -69,7 +69,6 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                 gti_segments.append(current_segment)
                 num_large_gaps = len(gti_segments) - 1
                 
-                # --- MODIFIED LOGIC: Replaced the single 'if' with an 'if/elif/else' chain. ---
 
                 # CASE A: 4 to 7 gaps -> Split into 2 plots
                 if 4 <= num_large_gaps <= 7:
@@ -77,7 +76,6 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                     plots_to_generate['part1'] = {'segments': gti_segments[:split_index], 'title': f"Light Curve Part 1 {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
                     plots_to_generate['part2'] = {'segments': gti_segments[split_index:], 'title': f"Light Curve Part 2 {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
 
-                # --- NEW LOGIC FOR 3 PLOTS ---
                 # CASE B: 8 or 9 gaps -> Split into 3 plots
                 elif num_large_gaps in [8, 9]:
                     n = len(gti_segments)
@@ -92,12 +90,7 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                 else:
                     plots_to_generate['full_light_curve'] = {'segments': gti_segments, 'title': f"Light Curve: {obs_id}", 'plot_type': 'broken_axis'}
 
-
-            # The rest of the plotting code below this point does not need to be changed.
-            # It will automatically handle generating 1, 2, or 3 plots based on the
-            # contents of `plots_to_generate`.
             for plot_key, plot_info in plots_to_generate.items():
-                # ... (rest of your plotting logic is unchanged) ...
                 title = plot_info['title']
 
                 if plot_info['plot_type'] == 'simple_continuous':
