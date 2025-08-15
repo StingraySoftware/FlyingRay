@@ -1,4 +1,3 @@
-
 import panel as pn
 import asyncio
 import time
@@ -24,9 +23,9 @@ from PIL import Image
 import copy
 
 from dashboard.plotting.functions import HIDPlotter, get_global_hid_data, create_global_hid_plot 
-from dashboard.dataproducts.nicer_products import create_energy_band_lightcurves, create_pds
-#from dashboard.dataproducts.nustar_products import create_energy_band_lightcurves, create_pds
-#from dashboard.dataproducts.rxte_products import create_energy_band_lightcurves, create_pds
+from dashboard.dataproducts.nicer_products import create_energy_band_lightcurves_nicer, create_pds_nicer
+from dashboard.dataproducts.nustar_products import create_energy_band_lightcurves_nustar, create_pds_nustar
+#from dashboard.dataproducts.rxte_products import create_energy_band_lightcurves_rxte, create_pds_nicer
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +34,24 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+
+MISSION = {
+    "nustar": {
+        "lc":  create_energy_band_lightcurves_nustar,
+        "pds": create_pds_nustar,
+        "soft_Eband": (3, 6),
+        "high_Eband": (6, 10),
+        "full_Eband": (3, 79),
+    },
+    "nicer": {
+        "lc": create_energy_band_lightcurves_nicer,
+        "pds": create_pds_nicer,
+        "soft_Eband": (2, 4),
+        "high_Eband": (4, 12),
+        "full_Eband": (0.4, 12),
+    },
+}
+
 
 def save_plot_data_to_hdf5(group, plot_name, plot_data_bytes):
     if plot_data_bytes:# its is the png 
@@ -52,13 +69,13 @@ def save_dataframe_to_hdf5(group, df, dataset_name):
     dataset[0] = csv_str
 
         
-def calculate_hid_parameters(events, obsid, no_of_detectors, outburst_id):
+def calculate_hid_parameters(events, obsid, no_of_detectors, outburst_id, mission):
     try:
         total_exposure = np.sum(get_gti_lengths(events.gti))
         if total_exposure <= 0: return None
-        intensity = len(events.filter_energy_range((0.4, 12)).time) / total_exposure
-        soft_rate = len(events.filter_energy_range((2, 4)).time) / total_exposure
-        hard_rate = len(events.filter_energy_range((4, 12)).time) / total_exposure
+        intensity = len(events.filter_energy_range((MISSION[mission]["full_Eband"])).time) / total_exposure
+        soft_rate = len(events.filter_energy_range((MISSION[mission]["soft_Eband"])).time) / total_exposure
+        hard_rate = len(events.filter_energy_range((MISSION[mission]["high_Eband"])).time) / total_exposure
         hardness_ratio = hard_rate / soft_rate if soft_rate > 0 else np.nan
         normalized_intensity = intensity / no_of_detectors if no_of_detectors > 0 else np.nan
         return {'ObsID': obsid,
@@ -80,52 +97,47 @@ def calculate_count_rate(events):
     except Exception:
         return 0.0
 
-# In h5.py
-# In your h5.py file
 
 async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission):
     """
     Processes a single observation, including its outburst ID, and saves the data.
     """
-    obs_id_match = re.search(r'(\d{10,})', evt_filepath)
+    if not evt_filepath:
+        logger.error("Received an empty list of event files to process.")
+        return
+
+    obs_id_match = re.search(r'(\d{10,})', evt_filepath[0])
     if not obs_id_match:
-        logger.error(f"Could not extract OBSID from event file: {evt_filepath}")
+        logger.error(f"Could not extract OBSID from event file: {evt_filepath[0]}")
         return
     obs_id = obs_id_match.group(1)
-    
-    print(f"\n{'='*20} STARTING process_observation for OBSID: {obs_id} {'='*20}")
-
     try:
         lc_func, pds_func = None, None
-        try:
-            if mission == 'nicer':
-                from dashboard.dataproducts.nicer_products import create_energy_band_lightcurves, create_pds
-            elif mission == 'rxte':
-                from dashboard.dataproducts.rxte_products import create_energy_band_lightcurves, create_pds
-            elif mission == 'nustar':
-                from dashboard.dataproducts.nustar_products import create_energy_band_lightcurves, create_pds
-            else:
-                raise ImportError(f"Unsupported mission: {mission}")
-            lc_func, pds_func = create_energy_band_lightcurves, create_pds
-        except ImportError as e:
-            print(f"--- DEBUG: FAILED to import data product functions: {e}")
-            return
-
-        events_data = EventList.read(evt_filepath, "hea", additional_columns=["DET_ID"])
-        ndet = len(set(events_data.det_id))
-        if ndet == 0 or calculate_count_rate(events_data) < 0.1:
-            logger.warning(f"Discarding {obs_id} due to low counts or no detectors.")
-            return
-
-        print("--- DEBUG: Submitting tasks to run in parallel...")
-        lc_task = asyncio.to_thread(lc_func, events_data, obs_id)
-        pds_task = asyncio.to_thread(pds_func, events_data, obs_id)
-        hid_task = asyncio.to_thread(calculate_hid_parameters, events_data, obs_id, ndet, outburst_id)
+        lc_func = MISSION[mission]["lc"]
+        pds_func = MISSION[mission]["pds"]
         
-        
+        if mission == 'nustar' and len(evt_filepath) > 1:
+            # Separate the event files for FPMA and FPMB the 2 detectors of nustar telescope
+            file_a = next(f for f in evt_filepath if 'A_src1' in f)
+            file_b = next(f for f in evt_filepath if 'B_src1' in f)
+            ev_A = EventList.read(file_a, "hea")
+            ev_B = EventList.read(file_b, "hea")
+            lc_task = asyncio.to_thread(lc_func, ev_A, ev_B, obs_id)
+
+            # For PDS and HID, i am joing the 2 evt files 
+            combined_events = ev_A.join(ev_B)
+            pds_task = asyncio.to_thread(pds_func, combined_events, obs_id)
+            hid_task = asyncio.to_thread(calculate_hid_parameters, combined_events, obs_id, 2, outburst_id, mission)
+
+        else: 
+            events_data = EventList.read(evt_filepath[0], "hea", additional_columns=["DET_ID"])
+            ndet = len(set(events_data.det_id))
+            lc_task = asyncio.to_thread(lc_func, events_data, obs_id)
+            pds_task = asyncio.to_thread(pds_func, events_data, obs_id)
+            hid_task = asyncio.to_thread(calculate_hid_parameters, events_data, obs_id, ndet, outburst_id, mission)
+
         results = await asyncio.gather(lc_task, pds_task, hid_task)
         
-
         lc_plots, pds_plot, hid_params = results
 
         with h5py.File(hdf5_file_path, 'a') as hdf:
@@ -177,14 +189,12 @@ async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission
     except Exception as e:
         logger.error(f"Failed to process and save OBSID {obs_id}", exc_info=True)
         
+        
 def create_h5_generator_tab(telescope_selector_widget):
     plotter_map = {}
     plot_scale_state = {}
     card_map = {}
     plot_pane_map = {}
-   # main_data_dir = "data"
-    #main_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-    #main_data_dir = "database"
     plot_type_heading = pn.pane.Markdown("## *No Plot Selected*", margin=(15, 0, 0, 20)) 
     header_card = pn.Card(
         plot_type_heading,
@@ -193,16 +203,31 @@ def create_h5_generator_tab(telescope_selector_widget):
         sizing_mode='stretch_width'
     )
 
-    plots_display_area = pn.FlexBox(sizing_mode='stretch_width', min_height=480, justify_content='center', align_items='start')
-    float_panel_container = pn.Column(sizing_mode='stretch_width',visible= False) 
+    plots_display_area = pn.FlexBox(
+        sizing_mode='stretch_width',
+        min_height=480, 
+        justify_content='center',
+        align_items='start'
+    )
+    
+    float_panel_container = pn.Column(
+        sizing_mode='stretch_width',
+        visible= False
+    ) 
    
     details_html_pane = pn.pane.HTML(sizing_mode='stretch_width')
-    close_button = pn.widgets.Button(name='Close Details', button_type='primary')
-    details_area = pn.Column(details_html_pane, pn.Row(close_button, align='center'), visible=False, sizing_mode='stretch_width')
+    close_button = pn.widgets.Button(
+        name='Close Details',
+        button_type='primary'
+    )
+    
+    details_area = pn.Column(
+        details_html_pane,
+        pn.Row(close_button, align='center'),
+        visible=False,
+        sizing_mode='stretch_width'
+    )
     close_button.on_click(lambda e: setattr(details_area, 'visible', False))
- # In your h5.py file
-
-# In your h5.py file
 
     def create_details_html(obs_id, selected_row, plotter):
 
@@ -364,9 +389,8 @@ def create_h5_generator_tab(telescope_selector_widget):
 
     def update_header(mission, card_to_update):
         card_to_update.title = f" Telescope: {mission.upper()}"
-        # In your h5.py file
-    def update_displayed_cards():
 
+    def update_displayed_cards():
     # --- 2. Create and add new cards that are not yet displayed ---
       current_sources = set(plotter_map.keys())
       existing_cards = set(card_map.keys())
@@ -396,8 +420,16 @@ def create_h5_generator_tab(telescope_selector_widget):
           if isinstance(plot_pane, (pn.pane.Plotly, pn.pane.Matplotlib)):
               plot_pane.param.watch(plot_click_factory(plotter), 'click_data')
 
-          linear_button = pn.widgets.Button(name='Linear Scale', button_type='default', width=120)
-          log_button = pn.widgets.Button(name='Log Scale', button_type='default', width=120)
+          linear_button = pn.widgets.Button(
+              name='Linear Scale', 
+              button_type='default',
+              width=120
+          )
+          log_button = pn.widgets.Button(
+              name='Log Scale',
+              button_type='default', 
+              width=120
+          )
 
           linear_button.disabled = (current_scale == 'linear')
           log_button.disabled = (current_scale == 'log')
@@ -455,7 +487,7 @@ def create_h5_generator_tab(telescope_selector_widget):
       else:
           plots_display_area.objects = new_cards_list
     
-    def plot_local_hids_callback(event, selected_sources, hid_df=None):
+    def plot_local_hids_callback(event, selected_sources, mission, hid_df=None):
       plot_type_heading.object = "## *Individual HID Diagrams*" 
 
       plots_display_area.loading = True
@@ -470,7 +502,7 @@ def create_h5_generator_tab(telescope_selector_widget):
       for source_name in selected_sources:
        
         try:
-            search_pattern = os.path.join("data", '**', f"{source_name.replace(' ', '_')}.h5")
+            search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
             found_files = glob.glob(search_pattern, recursive=True)
             if found_files:
                 file_path = found_files[0]
@@ -495,7 +527,7 @@ def create_h5_generator_tab(telescope_selector_widget):
       plots_display_area.loading = False
 
 
-    def plot_global_hid_callback(event, selected_sources):
+    def plot_global_hid_callback(event, selected_sources, mission):
         plot_type_heading.object = "## *Global HID Diagram*"
         plots_display_area.loading = True
         details_area.visible = False
@@ -504,7 +536,7 @@ def create_h5_generator_tab(telescope_selector_widget):
         logger.info("Resetting plotters to ensure full data is loaded for the global plot.")
         for source_name in selected_sources:
           try:
-             search_pattern = os.path.join("data", '**', f"{source_name.replace(' ', '_')}.h5")
+             search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
              found_files = glob.glob(search_pattern, recursive=True)
              if found_files:
                 # Overwrite any existing plotter with a new one that has the FULL hid_df
@@ -515,7 +547,7 @@ def create_h5_generator_tab(telescope_selector_widget):
             logger.error(f"Failed to reset plotter for {source_name}: {e}")
 
 
-        global_df = get_global_hid_data(selected_sources, "data")
+        global_df = get_global_hid_data(selected_sources, "data", mission)
 
         logger.info(f"get_global_hid_data returned a DataFrame with {len(global_df)} rows.")
 
@@ -534,7 +566,7 @@ def create_h5_generator_tab(telescope_selector_widget):
                 try:
                     source_name = event.new['points'][0]['customdata'][1]
                     if source_name not in plotter_map:
-                        search_pattern = os.path.join("data", '**', f"{source_name.replace(' ', '_')}.h5")
+                        search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
                         found_files = glob.glob(search_pattern, recursive=True)
                         if found_files:
                             plotter_map[source_name] = HIDPlotter(h5_file_path=found_files[0], name=source_name)
@@ -545,21 +577,26 @@ def create_h5_generator_tab(telescope_selector_widget):
                     logger.error(f"Error processing global plot click: {e}")
             plot_pane.param.watch(handle_global_plot_click, 'click_data')
 
-        combined_card = pn.Card(plot_pane, title="Combined Hardness-Intensity Diagram", css_classes=['plot-card-style'], sizing_mode='stretch_width')
-        logger.info(f"Created combined card: type={type(combined_card)}, sizing_mode='{combined_card.sizing_mode}', width={combined_card.width}, height={combined_card.height}, visible={combined_card.visible}")
+        combined_card = pn.Card(
+            plot_pane,
+            title="Combined Hardness-Intensity Diagram",
+            css_classes=['plot-card-style'], 
+            sizing_mode='stretch_width'
+        )
+        
         plots_display_area.objects = [combined_card]
-        logger.info(f"Updated plots_display_area.objects. New length: {len(plots_display_area.objects)}")
-        logger.info(f"State of plots_display_area after update: type={type(plots_display_area)}, sizing_mode='{plots_display_area.sizing_mode}', width={plots_display_area.width}, height={plots_display_area.height}")
-
         plots_display_area.loading = False
-        logger.info("LEAVING plot_global_hid_callback")
-        logger.info("-" * 60)
+
     telescope_selector_widget.param.watch(lambda event: update_header(event.new, card_to_update=header_card), 'value')
     update_header(telescope_selector_widget.value, card_to_update=header_card)
     
     plots_display_area.objects = [pn.pane.Markdown("### Select one or more files and click a plot button.", align='center')]
     
-    #plots_and_details = pn.Column(plots_display_area, details_area, sizing_mode='stretch_width')
-    plots_and_details = pn.Column(plots_display_area, details_area, float_panel_container, sizing_mode='stretch_width')
+    plots_and_details = pn.Column(
+        plots_display_area,
+        details_area, 
+        float_panel_container, 
+        sizing_mode='stretch_width'
+    )
 
     return header_card, plots_and_details, plot_local_hids_callback, plot_global_hid_callback

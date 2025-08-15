@@ -173,13 +173,13 @@ class HIDPlotter(param.Parameterized):
 
 # Replace the old get_global_hid_data function in plotting.py with this one:
 
-def get_global_hid_data(selected_sources, main_data_dir):
+def get_global_hid_data(selected_sources, main_data_dir, mission):
     """
     Aggregates HID data from multiple HDF5 files into a single DataFrame.
     """
     all_dfs = []
     for source_name in selected_sources:
-        search_pattern = os.path.join(main_data_dir, '**', f"{source_name.replace(' ', '_')}.h5")
+        search_pattern = os.path.join(main_data_dir, mission, '**', f"{source_name.replace(' ', '_')}.h5")
         found_files = glob.glob(search_pattern, recursive=True)
 
         # --- THIS IS THE FIX ---

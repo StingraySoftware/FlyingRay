@@ -14,8 +14,6 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy.coordinates.name_resolve import NameResolveError
 
-
-
 from heasarc_retrieve_pipeline.core import retrieve_heasarc_data_by_obsid
 from dashboard.HDF5.h5 import process_observation, create_h5_generator_tab
 
@@ -105,18 +103,30 @@ def retrieve_heasarc_data_by_obsid_wrapper(source: str, obsid: str, base_outdir:
     """
     obs_dir = os.path.join(base_outdir, obsid)
     abs_obs_dir = os.path.abspath(obs_dir)
-    done_file = os.path.join(abs_obs_dir, '**', '*_cl_bary.evt')
-
+    if mission == 'nicer':
+     bary_file_pattern = os.path.join(abs_obs_dir, '**', '*_cl_bary.evt')
+     found_files = glob.glob(bary_file_pattern, recursive=True)
+    elif mission == 'nustar':
+     bary_file_pattern = os.path.join(abs_obs_dir, '**', '*_src1_bary.evt')   
+     found_files = glob.glob(bary_file_pattern, recursive=True)
+    elif mission == 'rxte':
+     bary_file_pattern = os.path.join(abs_obs_dir, '**', '*_cl_evt.fits')   
+     found_files = glob.glob(bary_file_pattern, recursive=True)
+    
+    if found_files:
+        logger.info(f"Barycenter-corrected file found for {obsid}. Skipping pipeline.")
+        return abs_obs_dir
+    
     logger.info(f"Starting REAL processing for OBSID: {obsid} with flags: {flags}")
     retrieve_heasarc_data_by_obsid(
         #source=source,
         obsid=str(obsid),
         outdir=os.path.abspath(base_outdir),
-        mission="nicer",
+        mission=mission,
         test=False,
         flags=flags,
         force_heasarc = False,
-        force_s3 = False
+        force_s3 = True
 
     )
 
@@ -141,13 +151,12 @@ def get_obsids_from_heasarc_direct(source_name: str, mission: str):
 
         # 1. Normalize all column names to lowercase to prevent case-sensitivity issues.
         df.columns = [col.lower() for col in df.columns]
-
         
-        # 3. Determine the name of the stop time column we will create or use.
+        # 2. Determine the name of the stop time column we will create or use.
         # For RXTE, we calculate 'stop_time'; for others, we look for 'end_time'.
         stop_time_column = 'stop_time' if mission == 'rxte' else 'end_time'
 
-        # 4. Check for the column's existence and calculate it if it's missing.
+        # 3. Check for the column's existence and calculate it if it's missing.
         if stop_time_column not in df.columns:
             # This block now handles all cases where the precise stop time is missing.
             
@@ -252,21 +261,31 @@ def heasarc_pipeline_runner(source: str, obsids: list, base_outdir: str, mission
                     "mpugtiscr": "1.5:1.0:0:20",
                     "lowmemscr": "2.0:200:0:300"
                 }
+            elif mission == 'nustar':
+                final_flags = {}
+
             if custom_flags:
                 final_flags.update(custom_flags)
 
             obs_dir_path = retrieve_heasarc_data_by_obsid_wrapper(
-                source=source, obsid=obsid, base_outdir=base_outdir,
-                mission=mission, flags=final_flags
+                source=source,
+                obsid=obsid, 
+                base_outdir=base_outdir,
+                mission=mission,
+                flags=final_flags
             )
             if not obs_dir_path:
                 continue
-
-            evt_files = glob.glob(os.path.join(obs_dir_path, '**', '*_cl_bary.evt'), recursive=True)
+            if mission == 'nicer':
+             evt_files = glob.glob(os.path.join(obs_dir_path, '**', '*_cl_bary.evt'), recursive=True)
+            elif mission == 'nustar':
+             evt_files = glob.glob(os.path.join(obs_dir_path,  '**', '*_src1_bary.evt'), recursive=True)
+            elif mission == 'rxte':
+             evt_files = glob.glob(os.path.join(obs_dir_path,  '**', '*_cl_evt.fits'), recursive=True)
+                
             if not evt_files:
-                logger.error(f"No '*_cl_bary.evt' file found for OBSID {obsid} in {obs_dir_path}. Cannot process.")
+                logger.error(f"No 'evt' file found for OBSID {obsid} in {obs_dir_path}. Cannot process.")
                 continue
-            evt_file_path = evt_files[0]
             
             # Get the specific outburst ID for this observation
             outburst_id = outburst_mapping.get(obsid, 0) # Default to 0 if not found
@@ -274,8 +293,7 @@ def heasarc_pipeline_runner(source: str, obsids: list, base_outdir: str, mission
             logger.info(f"Appending data from {obsid} (Outburst {outburst_id}) to {hdf5_file_path}")
             
             # Pass the outburst ID to the processing function
-            asyncio.run(process_observation(evt_file_path, hdf5_file_path, outburst_id, mission))
-
+            asyncio.run(process_observation(evt_files, hdf5_file_path, outburst_id, mission))
 
             if not TEST_MODE:
                 shutil.rmtree(obs_dir_path)
@@ -396,9 +414,6 @@ def load_local_source_data(event, outburst_widget, obsid_widget, name_widget, te
     outburst_widget.name = "Select Outburst(s)"
     selected_source = event.new[0]
     mission = tels_name_widget.value
-    #h5_path = os.path.join("data", mission, f"{selected_source}.h5")
-    #h5_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", mission, f"{selected_source}.h5")
-    # The corrected, simple line
     h5_path = os.path.join("data", mission, f"{selected_source}.h5")
 
     if os.path.exists(h5_path):
@@ -541,35 +556,116 @@ def create_pipeline_runner_tab(status_pane, plot_local_hids_callback, plot_globa
     }
     """
 
- 
     # --- Widget Definitions ---
-    tels_name = pn.widgets.Select(name="Select Telescope", options=['nicer', 'nustar', 'rxte'], sizing_mode='stretch_width', height=60 , stylesheets=[input_style])  
+    tels_name = pn.widgets.Select(
+        name="Select Telescope",
+        options=['nicer', 'nustar', 'rxte'], 
+        sizing_mode='stretch_width', 
+        height=60 , 
+        stylesheets=[input_style]
+    )  
+    
     heasarc_heading = pn.pane.Markdown("### Data available on HEASARC")
-    source_name = pn.widgets.TextInput(name="Enter Source Name", placeholder='e.g., IGR J17091-3624', sizing_mode='stretch_width', height=60 , stylesheets=[input_style])
-    fetch_obsids_button = pn.widgets.Button(name="Fetch Available OBSID's", button_type="default", sizing_mode='stretch_width', stylesheets=[secondary_button_style])
+    source_name = pn.widgets.TextInput(
+        name="Enter Source Name", 
+        placeholder='e.g., IGR J17091-3624',
+        sizing_mode='stretch_width',
+        height=60 ,
+        stylesheets=[input_style]
+    )
+    
+    fetch_obsids_button = pn.widgets.Button(
+        name="Fetch Available OBSID's", 
+        button_type="default", 
+        sizing_mode='stretch_width',
+        stylesheets=[secondary_button_style]
+    )
+    
     outburst_summary_pane = pn.pane.Markdown("")
-    outburst_select = pn.widgets.MultiSelect(name="Select Whole Outburst(s)", disabled=True, sizing_mode='stretch_width', height=70, stylesheets=[input_style])
-    multi_obsid_select = pn.widgets.MultiSelect( disabled=True, sizing_mode='stretch_width', height=180, stylesheets=[input_style])
-
+    outburst_select = pn.widgets.MultiSelect(
+        name="Select Whole Outburst(s)",
+        disabled=True, 
+        sizing_mode='stretch_width', 
+        height=70, 
+        stylesheets=[input_style]
+    )
+    
+    multi_obsid_select = pn.widgets.MultiSelect( 
+        disabled=True,
+        sizing_mode='stretch_width', 
+        height=180,
+        stylesheets=[input_style]
+    )
 
     local_db_heading = pn.pane.Markdown("### Local Database")
-    local_source_select = pn.widgets.MultiSelect(name="Select Processed Source(s)", disabled=True, sizing_mode='stretch_width', height=150, stylesheets=[input_style])
-    select_all_sources_checkbox = pn.widgets.Checkbox(name="Select All Sources", value=False, disabled=True)
+    local_source_select = pn.widgets.MultiSelect(
+        name="Select Processed Source(s)", 
+        disabled=True, 
+        sizing_mode='stretch_width', 
+        height=150, 
+        stylesheets=[input_style]
+    )
     
-    plot_hid_button = pn.widgets.Button(name="Plot HID", button_type="default", disabled=True, sizing_mode='stretch_width', stylesheets=[secondary_button_style])
-    plot_global_hid_button = pn.widgets.Button(name="Plot Global HID", button_type="default", disabled=True, sizing_mode='stretch_width', stylesheets=[secondary_button_style])
-
-    local_outburst_select = pn.widgets.MultiSelect(name="Select Outburst(s)", disabled=True, sizing_mode='stretch_width', height=60, stylesheets=[input_style])
-    select_all_outbursts_checkbox = pn.widgets.Checkbox(name="Select All Outbursts", value=False, disabled=True)
-    local_obsid_select = pn.widgets.MultiSelect(name="OBSIDs in Selected File", size=6, disabled=True, sizing_mode='stretch_width', height=180, stylesheets=[input_style])
+    select_all_sources_checkbox = pn.widgets.Checkbox(
+        name="Select All Sources",
+        value=False,
+        disabled=True
+    )
     
-    custom_flags_input = pn.widgets.TextAreaInput(name='Pass additional flags as a JSON dictionary:', placeholder='{\n  "threshfilter": "ALL"\n}', resizable="height", sizing_mode='stretch_width', stylesheets=[input_style])
-    run_button = pn.widgets.Button(name="Download & Process Observations", button_type="success", disabled=True, sizing_mode='stretch_width', stylesheets=[secondary_button_style])
+    plot_hid_button = pn.widgets.Button(
+        name="Plot HID",
+        button_type="default",
+        disabled=True, 
+        sizing_mode='stretch_width',
+        stylesheets=[secondary_button_style]
+    )
+    
+    plot_global_hid_button = pn.widgets.Button(
+        name="Plot Global HID",
+        button_type="default",
+        disabled=True,
+        sizing_mode='stretch_width',
+        stylesheets=[secondary_button_style]
+    )
 
-
-    #_, _, plot_local_hids_callback, plot_global_hid_callback = create_h5_generator_tab(tels_name)
-  #  header_card, plots_and_details, plot_local_hids_callback, plot_global_hid_callback = create_h5_generator_tab(tels_name)
-   # plots_display_area = plots_and_details[0]
+    local_outburst_select = pn.widgets.MultiSelect(
+        name="Select Outburst(s)", 
+        disabled=True,
+        sizing_mode='stretch_width', 
+        height=60, 
+        stylesheets=[input_style]
+    )
+    
+    select_all_outbursts_checkbox = pn.widgets.Checkbox(
+        name="Select All Outbursts", 
+        value=False,
+        disabled=True
+    )
+    
+    local_obsid_select = pn.widgets.MultiSelect(
+        name="OBSIDs in Selected File", 
+        size=6, 
+        disabled=True,
+        sizing_mode='stretch_width',
+        height=180, 
+        stylesheets=[input_style]
+    )
+    
+    custom_flags_input = pn.widgets.TextAreaInput(
+        name='Pass additional flags as a JSON dictionary:', 
+        placeholder='{\n  "threshfilter": "ALL"\n}', 
+        resizable="height",
+        sizing_mode='stretch_width', 
+        stylesheets=[input_style]
+    )
+    
+    run_button = pn.widgets.Button(
+        name="Download & Process Observations",
+        button_type="success",
+        disabled=True,
+        sizing_mode='stretch_width',
+        stylesheets=[secondary_button_style]
+    )
 
     # --- Callbacks ---
     async def fetch_obsids_callback(event):
@@ -666,6 +762,7 @@ def create_pipeline_runner_tab(status_pane, plot_local_hids_callback, plot_globa
         """Callback to generate and display local Hardness-Intensity Diagrams (HIDs)."""
         selected_sources = local_source_select.value
         selected_obsids = local_obsid_select.value
+        selected_mission = tels_name.value
 
         # CASE 1: User has selected specific observations. Plot only those.
         if selected_obsids:            
@@ -684,7 +781,7 @@ def create_pipeline_runner_tab(status_pane, plot_local_hids_callback, plot_globa
             logger.info(f"--> Filtered dataframe now has {filtered_df.shape[0]} rows. This is what should be plotted.")
             logger.info("--> Calling plot_local_hids_callback with the filtered dataframe.")
 
-            plot_local_hids_callback(event, selected_sources, hid_df=filtered_df)
+            plot_local_hids_callback(event, selected_sources, hid_df=filtered_df, mission=selected_mission)
 
         else:
             logger.info("--> BRANCH: Handling full source plot.")
@@ -692,16 +789,17 @@ def create_pipeline_runner_tab(status_pane, plot_local_hids_callback, plot_globa
                 
              return
             logger.info("--> Calling plot_local_hids_callback for full source(s).")
-            plot_local_hids_callback(event, selected_sources)
+            plot_local_hids_callback(event, selected_sources, selected_mission)
   
     def on_plot_global_hid_click(event):
         """Callback to generate and display a global HID for multiple sources."""
         selected_sources = local_source_select.value
+        selected_mission = tels_name.value
         if not selected_sources:
             status_pane.object = "Status: No sources selected to plot a global HID."
             return
         status_pane.object = f"Status: Plotting a global HID for: {', '.join(selected_sources)}"
-        plot_global_hid_callback(event, selected_sources)
+        plot_global_hid_callback(event, selected_sources, selected_mission)
         
 
     # --- NEW FUNCTION TO MANAGE BUTTON STATE ---
@@ -746,7 +844,7 @@ def create_pipeline_runner_tab(status_pane, plot_local_hids_callback, plot_globa
         select_all_outbursts_checkbox,
         local_obsid_select,
         select_all_sources_checkbox,
-        plot_button_row,  # <-- ADDED BUTTON ROW
+        plot_button_row,  
         
     )
     divided_layout = pn.Row(left_column, right_column)
@@ -794,8 +892,10 @@ def create_pipeline_runner_tab(status_pane, plot_local_hids_callback, plot_globa
     plot_global_hid_button.on_click(on_plot_global_hid_click)
     local_source_select.param.watch(update_plot_button_state, 'value')
     
-    update_local_source_list(tels_name.value, local_source_select, select_all_sources_checkbox)
+    update_local_source_list(
+        tels_name.value, 
+        local_source_select,
+        select_all_sources_checkbox
+    )
     
-   # return controls
-    #return controls, plots_and_details
     return controls, tels_name
