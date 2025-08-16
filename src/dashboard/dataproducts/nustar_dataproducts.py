@@ -347,10 +347,6 @@ def create_pds_nustar(events_a, events_b, obs_id, segment_size=100.0, dt=1.0):
             ax.set_ylim(bottom=y_min * 0.5, top=y_max * 2.0)
 
 
-        x_lim_bottom = 1. / segment_size
-        x_lim_top = 1. / (2. * dt)
-        ax.set_xlim(left=x_lim_bottom, right=x_lim_top)
-    
      buf = BytesIO()
      fig.savefig(buf, format='png', dpi=100)
      buf.seek(0)
