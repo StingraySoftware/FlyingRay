@@ -3,8 +3,12 @@ import copy
 from io import BytesIO
 import numpy as np
 import matplotlib.pyplot as plt
-from stingray import Lightcurve, AveragedPowerspectrum, EventList
+from stingray import EventList
+from stingray.deadtime.fad import FAD, get_periodograms_from_FAD_results, calculate_FAD_correction
 from stingray.gti import get_gti_lengths
+from stingray.lightcurve import Lightcurve
+from stingray.powerspectrum import AveragedPowerspectrum
+
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +61,7 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                         variability_note = "NOTE: High variability detected (Max/Min > 50). Consider custom processing flags."
                         
 
-            all_gtis = sorted([tuple(g) for g in lc_det_a.gti], key=lambda x: x[0]) if lc_det_a.gti is not None else [] is this ok we are considering only detector a as there is 2 detecote if its ok then leave it i think its ok
-            
+            all_gtis = sorted([tuple(g) for g in lc_det_a.gti], key=lambda x: x[0]) if lc_det_a.gti is not None else [] 
             plots_to_generate = {}
             
             if len(all_gtis) <= 2 or len(all_gtis) > 10:
@@ -202,12 +205,12 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                             elif i == num_axes - 1:
                                 ax.spines['left'].set_visible(False)
                                 ax.tick_params(labelleft=False, left=False)
-                            else:
+                        else:
                                 ax.spines['left'].set_visible(False)
                                 ax.spines['right'].set_visible(False)
                                 ax.tick_params(labelleft=False, left=False)
                     
-                      if num_axes > 1:
+                    if num_axes > 1:
                        d = .015
                        kwargs = dict(transform=fig.transFigure, color='k', clip_on=False, lw=1)
                        for i in range(num_axes - 1):
@@ -216,26 +219,26 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                            fig.add_artist(plt.Line2D([x_mid - d, x_mid + d], [p1.y0 - d, p1.y0 + d], **kwargs))
                            fig.add_artist(plt.Line2D([x_mid - d, x_mid + d], [p1.y1 - d, p1.y1 + d], **kwargs))
 
-                      ymin, ymax = axes[0].get_ylim()
-                      if ymax > 0:
+                    ymin, ymax = axes[0].get_ylim()
+                    if ymax > 0:
                         axes[0].set_ylim(bottom= -0.15 * ymax, top=ymax * 1.15)
 
                     
-                      axes[0].set_ylabel(r'Counts s$^{-1}$')                    
-                      fig.supxlabel('Time [s]')
-                      fig.suptitle(title)    
+                    axes[0].set_ylabel(r'Counts s$^{-1}$')                    
+                    fig.supxlabel('Time [s]')
+                    fig.suptitle(title)    
 
-                  if note_to_add:
+                if note_to_add:
                                     ax.text(0.9, 0.95, note_to_add,
                                     transform=ax.transAxes, ha='right', va='top',
                                     fontsize=9, color='red', style='italic',
                                     bbox={'facecolor': 'white', 'alpha': 0.7, 'pad': 4})
 
-                  buf = BytesIO()
-                  fig.savefig(buf, format='png', dpi=100)
-                  buf.seek(0)
-                  plots_data[f"lightcurve_{band_name}_{plot_key}"] = buf.getvalue()
-                  plt.close(fig)
+                buf = BytesIO()
+                fig.savefig(buf, format='png', dpi=100)
+                buf.seek(0)
+                plots_data[f"lightcurve_{band_name}_{plot_key}"] = buf.getvalue()
+                plt.close(fig)
 
         except Exception as e:
             logging.error(f"Failed to create lightcurve for {obs_id} band {band_name}", exc_info=True)
@@ -243,51 +246,116 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
 
     return plots_data
 
-
-
-def create_pds_nustar(events, obs_id, segment_size=100.0, dt=0.001):
+def create_pds_nustar(events_a, events_b, obs_id, segment_size=100.0, dt=1.0):
     """
-    Creates a Power Density Spectrum (PDS) for Nustar data.
+    Creates a NuSTAR PDS.
+
+    First, it attempts to calculate the dead-time corrected PDS using the FAD
+    method. If this fails (e.g., due to data gaps or low counts), it logs a
+    warning and automatically falls back to calculating a standard, uncorrected
+    PDS.
+
     """
     try:
-        total_exposure = np.sum(get_gti_lengths(events.gti))
-        if total_exposure < segment_size:
-            return None
-        
-        pds = AveragedPowerspectrum.from_events(events, segment_size=segment_size, dt=dt, norm="frac", use_common_mean=True)
-        pds_reb = pds.rebin_log(0.03)
+        t_start = min(events_a.time[0], events_b.time[0])
+        t_end = max(events_a.time[-1], events_b.time[-1])
+        lc_a = Lightcurve.make_lightcurve(events_a.time, dt=dt, tstart=t_start, tseg=t_end-t_start)
+        lc_b = Lightcurve.make_lightcurve(events_b.time, dt=dt, tstart=t_start, tseg=t_end-t_start)
 
-        noise_powers = pds.power[pds.freq > 100]
-        P_noise = np.mean(noise_powers) if len(noise_powers) > 0 else 0
-        y_vals_reb = (pds_reb.power - P_noise) * pds_reb.freq
-        y_vals_full = (pds.power - P_noise) * pds.freq
+        if lc_a.counts.sum() == 0 or lc_b.counts.sum() == 0:
+            raise ValueError("Light curve is empty, cannot perform FAD.")
+        fad_results_table = calculate_FAD_correction(lc1=lc_a, lc2=lc_b, segment_size=segment_size, norm="frac")
+        pds_a = get_periodograms_from_FAD_results(fad_results_table, kind='pds1')
+        pds_a_reb = pds_a.rebin_log(0.03)
+        noise_powers_a = pds_a.power[pds_a.freq > 100]
+        noise_a = np.mean(noise_powers_a) if len(noise_powers_a) > 0 else 0
+        y_vals_a = (pds_a_reb.power - noise_a) * pds_a_reb.freq
+        #y_err_a = (pds_a_reb.power / np.sqrt(pds_a_reb.m)) * pds_a_reb.freq
+
+        # --- PDS for Detector B (FPMB) ---
+        pds_b = get_periodograms_from_FAD_results(fad_results_table, kind='pds2')
+        pds_b_reb = pds_b.rebin_log(0.03)
+        noise_powers_b = pds_b.power[pds_b.freq > 100]
+        noise_b = np.mean(noise_powers_b) if len(noise_powers_b) > 0 else 0
+        y_vals_b = (pds_b_reb.power - noise_b) * pds_b_reb.freq
+       # y_err_b = (pds_b_reb.power / np.sqrt(pds_b_reb.m)) * pds_b_reb.freq
+
+        valid_mask_a = (y_vals_a > 0) & np.isfinite(y_vals_a)
+        valid_mask_b = (y_vals_b > 0) & np.isfinite(y_vals_b)
+        
+        if not np.any(valid_mask_a) and not np.any(valid_mask_b):
+         raise ValueError("FAD resulted in no positive power values.")
 
         fig, ax = plt.subplots()
-        ax.plot(pds.freq, y_vals_full, drawstyle="steps-mid", color="grey", alpha=0.5)
-        ax.plot(pds_reb.freq, y_vals_reb, drawstyle="steps-mid", color="k")
+        plot_title = f"NuSTAR FAD-Corrected PDS: {obs_id}"
+        ax.plot(pds_a_reb.freq[valid_mask_a], y_vals_a[valid_mask_a], drawstyle="steps-mid", color="dodgerblue")
         
-        ax.loglog()
-        ax.set_xlabel("Frequency (Hz)")
-        ax.set_ylabel(r"Power $\times$ Frequency [$(\mathrm{rms/mean})^2$]")
-        ax.set_title(f"PDS {obs_id}")
-        ax.set_xlim(left=1./segment_size, right=1./(2.*dt))
+        ax.plot(pds_b_reb.freq[valid_mask_b], y_vals_b[valid_mask_b], drawstyle="steps-mid", color="orangered",alpha=0.7)
 
-        if len(noise_powers) > 0 and np.any(y_vals_reb):
-            y_vals_pos = y_vals_reb[y_vals_reb > 0]
-            if len(y_vals_pos) > 0:
-                y_lower = np.min(y_vals_pos) * 0.5
-                y_upper = np.max(y_vals_reb) * 2.0
-                if y_upper > y_lower:
-                    ax.set_ylim(bottom=y_lower, top=y_upper)
+             
+    except Exception as fad_error:
+        logger.warning(f"FAD correction failed for {obs_id}: {fad_error}. Falling back to standard PDS.")
+        try:
+        # --- PDS for Detector A (FPMA) ---
+         pds_a = AveragedPowerspectrum.from_events(
+            events_a, segment_size=segment_size, dt=dt, norm="frac", use_common_mean=True
+         )
+         pds_a_reb = pds_a.rebin_log(0.03)
+         noise_powers_a = pds_a.power[pds_a.freq > 100]
+         noise_a = np.mean(noise_powers_a) if len(noise_powers_a) > 0 else 0
+         y_vals_a = (pds_a_reb.power - noise_a) * pds_a_reb.freq
 
-        fig.tight_layout()
-        buf = BytesIO()
-        fig.savefig(buf, format='png', dpi=100)
-        buf.seek(0)
-        plot_data = buf.getvalue()
-        plt.close(fig)
-        return plot_data
+        # --- PDS for Detector B (FPMB) ---
+         pds_b = AveragedPowerspectrum.from_events(
+            events_b, segment_size=segment_size, dt=dt, norm="frac", use_common_mean=True
+         )
+         pds_b_reb = pds_b.rebin_log(0.03)
+         noise_powers_b = pds_b.power[pds_b.freq > 100]
+         noise_b = np.mean(noise_powers_b) if len(noise_powers_b) > 0 else 0
+         y_vals_b = (pds_b_reb.power - noise_b) * pds_b_reb.freq
+         valid_mask_a = (y_vals_a > 0) & np.isfinite(y_vals_a)
+         valid_mask_b = (y_vals_b > 0) & np.isfinite(y_vals_b)
 
-    except Exception as e:
-        logger.error(f"PDS FAILED for {obs_id}", exc_info=True)
-        return None
+         if not np.any(valid_mask_a) and not np.any(valid_mask_b):
+           raise ValueError("FAD resulted in no positive power values.")
+
+         fig, ax = plt.subplots()
+         plot_title = f"NuSTAR Standard PDS: {obs_id} (FAD Failed)"
+        
+         ax.plot(pds_a_reb.freq[valid_mask_a], y_vals_a[valid_mask_a], drawstyle="steps-mid", color="dodgerblue")
+        
+         ax.plot(pds_b_reb.freq[valid_mask_b], y_vals_b[valid_mask_b], drawstyle="steps-mid", color="orangered",alpha=0.7)
+
+        except Exception:
+            logger.error(f"FATAL: Both FAD and Standard PDS failed for {obs_id}", exc_info=True)
+            return None
+
+    if 'fig' in locals() and 'ax' in locals():
+     ax.loglog()
+     ax.set_xlabel("Frequency (Hz)")
+     ax.set_ylabel(r"Power $\times$ Frequency [$(\mathrm{rms/mean})^2$]")
+     ax.set_title(plot_title)
+
+     x_lim_bottom = 1. / segment_size
+     x_lim_top = 1. / (2. * dt)
+     ax.set_xlim(left=x_lim_bottom, right=x_lim_top)
+
+     all_y_vals = np.concatenate((y_vals_a[valid_mask_a], y_vals_b[valid_mask_b]))
+     if len(all_y_vals) > 0:
+            y_min = np.min(all_y_vals)
+            y_max = np.max(all_y_vals)
+            ax.set_ylim(bottom=y_min * 0.5, top=y_max * 2.0)
+
+
+        x_lim_bottom = 1. / segment_size
+        x_lim_top = 1. / (2. * dt)
+        ax.set_xlim(left=x_lim_bottom, right=x_lim_top)
+    
+     buf = BytesIO()
+     fig.savefig(buf, format='png', dpi=100)
+     buf.seek(0)
+     plot_data = buf.getvalue()
+     plt.close(fig)
+
+    return plot_data
+
