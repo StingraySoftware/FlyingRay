@@ -22,6 +22,7 @@ from datetime import datetime
 from PIL import Image
 import copy
 
+from dashboard.home.info import dashboard_info_text
 from dashboard.plotting.functions import HIDPlotter, get_global_hid_data, create_global_hid_plot 
 from dashboard.dataproducts.nicer_products import create_energy_band_lightcurves_nicer, create_pds_nicer
 from dashboard.dataproducts.nustar_products import create_energy_band_lightcurves_nustar, create_pds_nustar
@@ -126,7 +127,7 @@ async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission
 
             # For PDS and HID, i am joing the 2 evt files 
             combined_events = ev_A.join(ev_B)
-            pds_task = asyncio.to_thread(pds_func, combined_events, obs_id)
+            pds_task = asyncio.to_thread(pds_func, ev_A, ev_B, obs_id)
             hid_task = asyncio.to_thread(calculate_hid_parameters, combined_events, obs_id, 2, outburst_id, mission)
 
         else: 
@@ -195,7 +196,7 @@ def create_h5_generator_tab(telescope_selector_widget):
     plot_scale_state = {}
     card_map = {}
     plot_pane_map = {}
-    plot_type_heading = pn.pane.Markdown("## *No Plot Selected*", margin=(15, 0, 0, 20)) 
+    plot_type_heading = pn.pane.Markdown("## *HOME*", margin=(15, 0, 0, 20)) 
     header_card = pn.Card(
         plot_type_heading,
         css_classes=['hid-card'],
@@ -243,7 +244,8 @@ def create_h5_generator_tab(telescope_selector_widget):
       if pds_png_data is not None:
         encoded_pds_image = base64.b64encode(pds_png_data).decode('utf-8')
         pds_img_src = f'data:image/png;base64,{encoded_pds_image}'
-        pds_html = f'<div style="{pds_style}"><h4>Power Density Spectrum</h4><img src="{pds_img_src}" style="width: 100%; height: auto; border: 1px solid #ddd;"></div>'
+        pds_html = f'<div style="{pds_style}"><h4>Power Density Spectrum</h4><img src="{pds_img_src}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"></div>'
+        
       else:
         pds_html = f'<div style="{pds_style}"><h4>Power Density Spectrum</h4><p>Not available</p></div>'
 
@@ -255,7 +257,7 @@ def create_h5_generator_tab(telescope_selector_widget):
         for title, png_data in all_lc_plots.items():
             encoded_image = base64.b64encode(png_data).decode('utf-8')
             img_src = f'data:image/png;base64,{encoded_image}'
-            lc_html_parts.append(f'<div style="{style}"><h4>Light Curve ({title})</h4><img src="{img_src}" style="width: 100%; height: auto; border: 1px solid #ddd;"></div>')
+            lc_html_parts.append(f'<div style="{style}"><h4>Light Curve ({title})</h4><img src="{img_src}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"></div>')
         
         all_lc_html = "".join(lc_html_parts)
         
@@ -274,7 +276,7 @@ def create_h5_generator_tab(telescope_selector_widget):
             title, png_data = list(all_lc_plots.items())[0]
             encoded_image = base64.b64encode(png_data).decode('utf-8')
             img_src = f'data:image/png;base64,{encoded_image}'
-            plot_html_parts.append(f'<div style="{style}"><h4>Light Curve ({title})</h4><img src="{img_src}" style="width: 100%; height: auto; border: 1px solid #ddd;"></div>')
+            plot_html_parts.append(f'<div style="{style}"><h4>Light Curve ({title})</h4><img src="{img_src}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"></div>')
 
         # Add the PDS to the SAME list
           plot_html_parts.append(pds_html)
@@ -387,8 +389,8 @@ def create_h5_generator_tab(telescope_selector_widget):
                 details_html_pane.object = f'<div class="alert alert-danger">Failed to load details: {e}</div>'
         pn.state.execute(load_details_html)
 
-    def update_header(mission, card_to_update):
-        card_to_update.title = f" Telescope: {mission.upper()}"
+   # def update_header(mission, card_to_update):
+    #    card_to_update.title = f" Telescope: {mission.upper()}"
 
     def update_displayed_cards():
     # --- 2. Create and add new cards that are not yet displayed ---
@@ -587,10 +589,12 @@ def create_h5_generator_tab(telescope_selector_widget):
         plots_display_area.objects = [combined_card]
         plots_display_area.loading = False
 
-    telescope_selector_widget.param.watch(lambda event: update_header(event.new, card_to_update=header_card), 'value')
-    update_header(telescope_selector_widget.value, card_to_update=header_card)
+    #telescope_selector_widget.param.watch(lambda event: update_header(event.new, card_to_update=header_card), 'value')
+    #update_header(telescope_selector_widget.value, card_to_update=header_card)
     
-    plots_display_area.objects = [pn.pane.Markdown("### Select one or more files and click a plot button.", align='center')]
+   # plots_display_area.objects = [pn.pane.Markdown("### Select one or more files and click a plot button.", align='center')]
+    info_pane = pn.pane.Markdown(dashboard_info_text, sizing_mode='stretch_width')
+    plots_display_area.objects = [info_pane]
     
     plots_and_details = pn.Column(
         plots_display_area,
