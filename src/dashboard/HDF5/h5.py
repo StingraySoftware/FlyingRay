@@ -246,6 +246,47 @@ def create_h5_generator_tab(telescope_selector_widget):
     )
     close_button.on_click(lambda e: setattr(details_area, 'visible', False))
 
+    
+    # Helper function to create HTML for any plot, avoiding repetition
+def create_h5_generator_tab(telescope_selector_widget):
+    plotter_map = {}
+    plot_scale_state = {}
+    card_map = {}
+    plot_pane_map = {}
+    plot_type_heading = pn.pane.Markdown("## *HOME*", margin=(15, 0, 0, 20)) 
+    header_card = pn.Card(
+        plot_type_heading,
+        css_classes=['hid-card'],
+        collapsible=True,
+        sizing_mode='stretch_width'
+    )
+
+    plots_display_area = pn.FlexBox(
+        sizing_mode='stretch_width',
+        min_height=480, 
+        justify_content='center',
+        align_items='start'
+    )
+    
+    float_panel_container = pn.Column(
+        sizing_mode='stretch_width',
+        visible= False
+    ) 
+   
+    details_html_pane = pn.pane.HTML(sizing_mode='stretch_width')
+    close_button = pn.widgets.Button(
+        name='Close Details',
+        button_type='primary'
+    )
+    
+    details_area = pn.Column(
+        details_html_pane,
+        pn.Row(close_button, align='center'),
+        visible=False,
+        sizing_mode='stretch_width'
+    )
+    close_button.on_click(lambda e: setattr(details_area, 'visible', False))
+
     def create_details_html(obs_id, selected_row, plotter):
 
       style = "width: 400px; margin: 10px; text-align: center;"
@@ -254,8 +295,7 @@ def create_h5_generator_tab(telescope_selector_widget):
     # 1. Get all available plot data first
       all_lc_plots = plotter.get_all_lightcurve_pngs(plotter.h5_file_path, obs_id)
       pds_png_data = plotter.get_pds_png(plotter.h5_file_path, obs_id)
-    
-    # 2. Prepare the PDS plot HTML (we'll need this in both cases)
+
       pds_html = ""
       if pds_png_data is not None:
         encoded_pds_image = base64.b64encode(pds_png_data).decode('utf-8')
@@ -264,44 +304,43 @@ def create_h5_generator_tab(telescope_selector_widget):
         
       else:
         pds_html = f'<div style="{pds_style}"><h4>Power Density Spectrum</h4><p>Not available</p></div>'
+    
+# --- 3. THE CONDITIONAL LAYOUT LOGIC ---
+    
+    # First, convert all plot data to a list of HTML strings
+      lc_html_list = []
+      for title, png_data in all_lc_plots.items():
+        encoded_image = base64.b64encode(png_data).decode('utf-8')
+        img_src = f'data:image/png;base64,{encoded_image}'
+        lc_html_list.append(f'<div style="{style}"><h4>Light Curve ({title})</h4><img src="{img_src}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"></div>')
 
-    # --- 3. THE CONDITIONAL LAYOUT LOGIC ---
+    # Now, arrange the plots using the list we just made
       plots_html_block = ""
-      if len(all_lc_plots) > 1:
-        # --- Case 1: More than one LC -> LCs in a row, PDS below ---
-        lc_html_parts = []
-        for title, png_data in all_lc_plots.items():
-            encoded_image = base64.b64encode(png_data).decode('utf-8')
-            img_src = f'data:image/png;base64,{encoded_image}'
-            lc_html_parts.append(f'<div style="{style}"><h4>Light Curve ({title})</h4><img src="{img_src}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"></div>')
+      num_lcs = len(lc_html_list)
+
+      if num_lcs == 3:
+        # Case for 3 LCs -> Perfectly aligned 2x2 grid
+        # 1. Combine all four plot HTML strings
+        all_plots_html = lc_html_list[0] + lc_html_list[1] + lc_html_list[2] + pds_html
         
-        all_lc_html = "".join(lc_html_parts)
-        
-        # Assemble the final HTML with the vertical layout
+        # 2. Put them in a single wrapping container with a fixed width
+        # The max-width (e.g., 850px) is crucial for forcing a 2-column wrap
         plots_html_block = f"""
-            <div style="display: flex; justify-content: center; flex-wrap: wrap;">{all_lc_html}</div>
+            <div style="display: flex; flex-wrap: wrap; justify-content: center; max-width: 850px; margin: auto;">
+                {all_plots_html}
+            </div>
+        """
+      elif num_lcs == 2:
+        # Case for 2 LCs -> LCs side-by-side, PDS below
+        all_lcs_html = "".join(lc_html_list)
+        plots_html_block = f"""
+            <div style="display: flex; justify-content: center; flex-wrap: wrap;">{all_lcs_html}</div>
             <div>{pds_html}</div>
         """
       else:
-        # --- Case 2: One (or zero) LCs -> All plots in a single side-by-side row ---
-          plot_html_parts = []
-          if not all_lc_plots:
-            plot_html_parts.append(f'<div style="{style}"><h4>Light Curve</h4><p>Not available</p></div>')
-          else:
-            # Get the single light curve's data
-            title, png_data = list(all_lc_plots.items())[0]
-            encoded_image = base64.b64encode(png_data).decode('utf-8')
-            img_src = f'data:image/png;base64,{encoded_image}'
-            plot_html_parts.append(f'<div style="{style}"><h4>Light Curve ({title})</h4><img src="{img_src}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);"></div>')
-
-        # Add the PDS to the SAME list
-          plot_html_parts.append(pds_html)
-
-        # Join them all together for a single flex row
-          all_plots_html = "".join(plot_html_parts)
-          plots_html_block = f"""
-            <div style="display: flex; justify-content: center; flex-wrap: wrap;">{all_plots_html}</div>
-        """
+        # Case for 0 or 1 LC -> All side-by-side
+        lc_html = lc_html_list[0] if lc_html_list else f'<div style="{style}"><h4>Light Curve</h4><p>Not available</p></div>'
+        plots_html_block = f'<div style="display: flex; justify-content: center; flex-wrap: wrap;">{lc_html}{pds_html}</div>'
 
     # --- 4. Get text data (unchanged) ---
       intensity_val = selected_row.get('Intensity', np.nan)
@@ -419,18 +458,19 @@ def create_h5_generator_tab(telescope_selector_widget):
       new_cards_list = [] 
           
         
-      for source_name, plotter in plotter_map.items():
-          
+      for unique_key, plotter in plotter_map.items():
+          source_name, mission = unique_key
           if plotter == "ERROR":
               card = pn.Card(f"Could not load data for **{source_name}**.", css_classes=['plot-card-style'], width=480)
               new_cards_list.append(card)
               card_map[source_name] = card
+              new_cards_list.append(card)
               continue
 
         # Initial plot creation
-          current_scale = plot_scale_state.get(source_name, 'log')
+          current_scale = plot_scale_state.get(unique_key, 'log')
           plot_pane = plotter.hid_plot(yscale=current_scale)
-          plot_pane_map[source_name] = plot_pane
+          plot_pane_map[unique_key] = plot_pane
 
           def plot_click_factory(p):
             return lambda event: update_float_panel_details(event, p)
@@ -468,8 +508,8 @@ def create_h5_generator_tab(telescope_selector_widget):
                   log_btn.disabled = (new_scale == 'log')
               return scale_click
 
-          linear_button.on_click(scale_change_factory(source_name, 'linear', linear_button, log_button))
-          log_button.on_click(scale_change_factory(source_name, 'log', linear_button, log_button))
+          linear_button.on_click(scale_change_factory(unique_key, 'linear', linear_button, log_button))
+          log_button.on_click(scale_change_factory(unique_key, 'log', linear_button, log_button))
 
           remove_button = pn.widgets.Button(name='Remove', button_type='danger', width=120)
 
@@ -480,7 +520,7 @@ def create_h5_generator_tab(telescope_selector_widget):
                   update_displayed_cards()  # Call this to remove the card from the display
               return remove_click
         
-          remove_button.on_click(remove_source_factory(source_name))
+          remove_button.on_click(remove_source_factory(unique_key))
 
           button_controls = pn.Column(
             pn.Row(linear_button, log_button, align='center'),
@@ -491,14 +531,14 @@ def create_h5_generator_tab(telescope_selector_widget):
           card = pn.Card( 
                   plot_pane,
                   button_controls,
-                  header = f"### {source_name} ({telescope_selector_widget.value.upper()})",
+                  header = f"### {source_name} ({mission.upper()})",
                   collapsible=False,           
                   css_classes=['plot-card-style'], 
                   width=480
          )
 
 
-          card_map[source_name] = card  # Store reference to the whole card
+          card_map[unique_key] = card  # Store reference to the whole card
           new_cards_list.append(card)
 
     # --- 3. Update the final display area ---
@@ -520,7 +560,7 @@ def create_h5_generator_tab(telescope_selector_widget):
 
     # This loop now creates or updates a plotter for each selected source.
       for source_name in selected_sources:
-       
+        unique_key = (source_name, mission)
         try:
             search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
             found_files = glob.glob(search_pattern, recursive=True)
@@ -531,16 +571,16 @@ def create_h5_generator_tab(telescope_selector_widget):
                 # - If hid_df is provided, it creates a plotter with the filtered data.
                 # - If hid_df is None, it creates a plotter with the full data.
                 # - If a plotter for 'source_name' already exists, it is replaced.
-                plotter_map[source_name] = HIDPlotter(
+                plotter_map[unique_key] = HIDPlotter(
                     h5_file_path=file_path,
                     name=source_name,
                     hid_df=hid_df 
                 )
-                plot_scale_state.setdefault(source_name, 'log')
+                plot_scale_state.setdefault(unique_key, 'log')
             else:
-                plotter_map[source_name] = "ERROR"
+                plotter_map[unique_key] = "ERROR"     
         except Exception as e:
-            plotter_map[source_name] = "ERROR"
+            plotter_map[unique_key] = "ERROR"          
             logger.error(f"--> Error initializing plotter for {source_name}", exc_info=True)
 
       update_displayed_cards()
@@ -559,8 +599,9 @@ def create_h5_generator_tab(telescope_selector_widget):
              search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
              found_files = glob.glob(search_pattern, recursive=True)
              if found_files:
+                 unique_key = (source_name, mission)
                 # Overwrite any existing plotter with a new one that has the FULL hid_df
-                  plotter_map[source_name] = HIDPlotter(h5_file_path=found_files[0], name=source_name)
+                 plotter_map[unique_key] = HIDPlotter(h5_file_path=found_files[0], name=source_name)
              else:
                   logger.warning(f"Could not find H5 file for {source_name} during plotter reset.")
           except Exception as e:
