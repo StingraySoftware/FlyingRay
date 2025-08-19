@@ -15,7 +15,7 @@ Start by cloning the project from the GitHub repository:
 
 .. code-block:: bash
 
-   git clone https://github.com/your-username/FlyingRay.git
+   git clone https://github.com/StingraySoftware/FlyingRay.git
    cd FlyingRay
 
 Step 2: Create and Activate a Virtual Environment
