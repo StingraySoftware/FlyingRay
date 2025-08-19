@@ -61,10 +61,31 @@ Navigate to **http://localhost:5006** in your browser, as the application will b
 Contributing to FlyingRay
 ------------------------
 
-Reporting Bugs & Feature Requests
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Bug Reports
+~~~~~~~~~~~
 
-If you encounter a bug or have an idea for a new feature, please report it in the `GitHub Issues <https://github.com/your-username/FlyingRay/issues>`_ section. Describe how to reproduce the bug, including the mission, OBSID, and any custom flags used. We also welcome pull requests for bug fixes.
+If you encounter a bug, you can directly report it in the `issues section <https://github.com/your-username/FlyingRay/issues>`_.
+
+Please describe how to reproduce the bug and include as much information as possible, such as:
+
+* The mission you were working with
+* The OBSID you were processing
+* Any custom flags used
+
+Bug Fixes
+~~~~~~~~~
+
+Are you able to fix a bug? We welcome pull requests! You can open a new pull request with your suggested fix.
+
+Feature Requests and Feedback
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+We would love to hear your thoughts on FlyingRay.
+
+Are there any new features, plots, or analysis tools that would improve the effectiveness and usability of the dashboard for your research? Let us know!
+
+All feedback and suggestions for new features can be submitted as a new issue.
+
 
 Support Channels
 ~~~~~~~~~~~~~~~~
