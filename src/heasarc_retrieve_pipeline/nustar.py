@@ -117,7 +117,7 @@ def nu_run_l2_pipeline(obsid, config, flags=None):
     datadir = nu_local_raw_data_path.fn(obsid, config=config)
     ev_dir = nu_pipeline_output_path.fn(obsid, config=config)
     os.makedirs(ev_dir, exist_ok=True)
- params = {
+    params = {
         "indir": datadir,
         "outdir": ev_dir,
         "steminputs": "nu" + obsid,
@@ -132,7 +132,6 @@ def nu_run_l2_pipeline(obsid, config, flags=None):
         params.update(flags)
 
     result = nupipeline(**params)
-    )
     print("return code:", result.returncode)
     if result.returncode != 0:
         logger.error(f"nupipeline failed: {result.stderr}")
