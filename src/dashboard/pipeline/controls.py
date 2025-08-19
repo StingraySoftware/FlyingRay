@@ -1,4 +1,3 @@
-
 import panel as pn
 import asyncio
 import pandas as pd
@@ -9,18 +8,50 @@ import shutil
 import glob
 import json
 import h5py  
+import atexit
+import subprocess
 from astroquery.heasarc import Heasarc
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy.coordinates.name_resolve import NameResolveError
 
-from heasarc_retrieve_pipeline.core import retrieve_heasarc_data_by_obsid
-from dashboard.HDF5.h5 import process_observation, create_h5_generator_tab
+from src.heasarc_retrieve_pipeline.core import retrieve_heasarc_data_by_obsid
+from src.dashboard.HDF5.h5 import process_observation, create_h5_generator_tab
 
 TEST_MODE = True
+prefect_process = None
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+def start_prefect_server():
+    """Starts the Prefect server as a background process."""
+    global prefect_process
+    try:
+        logger.info("Starting Prefect server in the background...")
+        # Use Popen to run the server as a non-blocking background process
+        prefect_process = subprocess.Popen(["prefect", "server", "start"])
+        logger.info(f"Prefect server started with process ID: {prefect_process.pid}")
+    except FileNotFoundError:
+        logger.error("'prefect' command not found. Make sure Prefect is installed and in your PATH.")
+    except Exception as e:
+        logger.error(f"Failed to start Prefect server: {e}", exc_info=True)
+
+def stop_prefect_server():
+    """Stops the background Prefect server process if it's running."""
+    global prefect_process
+    if prefect_process:
+        logger.info(f"Shutting down Prefect server (PID: {prefect_process.pid})...")
+        prefect_process.terminate() # Send a termination signal
+        prefect_process.wait()      # Wait for the process to exit
+        logger.info("Prefect server shut down.")
+
+# Register the cleanup function to run when the script exits
+atexit.register(stop_prefect_server)
+
+# Start the server when the script is first loaded
+start_prefect_server()
 
 MISSION_INFO = {
     "nustar": {
@@ -118,17 +149,20 @@ def retrieve_heasarc_data_by_obsid_wrapper(source: str, obsid: str, base_outdir:
         return abs_obs_dir
     
     logger.info(f"Starting REAL processing for OBSID: {obsid} with flags: {flags}")
-    retrieve_heasarc_data_by_obsid(
-        #source=source,
-        obsid=str(obsid),
-        outdir=os.path.abspath(base_outdir),
-        mission=mission,
-        test=False,
-        flags=flags,
-        force_heasarc = False,
-        force_s3 = True
+    use_s3 = True
+    if mission == 'rxte':
+      logger.warning("Forcing HTTPS download for RXTE due to potential S3 path issues.")
+      use_s3 = False
 
-    )
+    retrieve_heasarc_data_by_obsid(
+     obsid=str(obsid),
+     outdir=os.path.abspath(base_outdir),
+     mission=mission,
+     test=False,
+     flags=flags,
+     force_s3=use_s3,
+     force_heasarc=(not use_s3)
+   )
 
     os.makedirs(abs_obs_dir, exist_ok=True)
     with open(os.path.join(abs_obs_dir, "obsid_done.TXT"), "w") as f:
@@ -213,7 +247,6 @@ def get_obsids_from_heasarc_direct(source_name: str, mission: str):
             columns={'obsid': 'OBSID', 'time': 'MJD', 'date': 'DATE', 'outburst_id': 'OUTBURST_ID', 'ra': 'RA', 'dec': 'DEC'})
             
         return output_df
-        
         
 def heasarc_pipeline_runner(source: str, obsids: list, base_outdir: str, mission: str, hdf5_file_path: str, status_pane, outburst_mapping: dict, custom_flags: dict = None):
     """
@@ -307,7 +340,6 @@ def heasarc_pipeline_runner(source: str, obsids: list, base_outdir: str, mission
     logger.info("PIPELINE COMPLETED.")
     status_pane.object = f"**Pipeline Finished.** HDF5 file updated at: {hdf5_file_path}"
     pn.state.cache['latest_h5_file'] = hdf5_file_path
-
 
 
 def update_local_source_list(mission, local_widget, select_all_sources_checkbox):
@@ -446,10 +478,9 @@ def load_local_source_data(event, outburst_widget, obsid_widget, name_widget, te
             
             # -- ADDED -- Enable the checkbox
             select_all_checkbox.disabled = False
-            
             obsid_options = {
-                f"{int(row['ObsID'])} (Outburst {int(row['Outburst'])})": str(int(row['ObsID']))
-                for _, row in hid_df.iterrows()
+            f"{row['ObsID']} (Outburst {int(row['Outburst'])})": str(row['ObsID'])
+            for _, row in hid_df.iterrows()
             }
             obsid_widget.options = obsid_options
             obsid_widget.value = [] 

@@ -103,7 +103,7 @@ def separate_sources(directories, config):
     cache_expiration=timedelta(days=1000),
     task_run_name="l2_pipeline_obsid_{obsid}",
 )
-def nu_run_l2_pipeline(obsid, config):
+def nu_run_l2_pipeline(obsid, config, flags=None):
     if not HAS_HEASOFT:
         raise ImportError("heasoftpy not installed")
     pipe_done_file = nu_pipeline_done_file.fn(obsid, config=config)
@@ -117,15 +117,21 @@ def nu_run_l2_pipeline(obsid, config):
     datadir = nu_local_raw_data_path.fn(obsid, config=config)
     ev_dir = nu_pipeline_output_path.fn(obsid, config=config)
     os.makedirs(ev_dir, exist_ok=True)
-    stem = "nu" + obsid
-    result = nupipeline(
-        indir=datadir,
-        outdir=ev_dir,
-        clobber="yes",
-        steminputs=stem,
-        instrument="ALL",
-        noprompt=True,
-        verbose=True,
+ params = {
+        "indir": datadir,
+        "outdir": ev_dir,
+        "steminputs": "nu" + obsid,
+        "instrument": "ALL",
+        "clobber": "yes",
+        "noprompt": True,
+        "verbose": True,
+    }
+
+    if flags:
+        logger.info(f"Applying custom flags: {flags}")
+        params.update(flags)
+
+    result = nupipeline(**params)
     )
     print("return code:", result.returncode)
     if result.returncode != 0:
@@ -250,6 +256,32 @@ def join_source_data(obsid, directories, config, src_num=1):
     return outfiles
 
 
+@task(
+    cache_key_fn=task_input_hash,
+    cache_expiration=timedelta(days=90),
+    task_run_name="nu_barycenter_{infile}",
+)
+def barycenter_file(infile, attorb, ra=None, dec=None, src=1):
+    logger = get_run_logger()
+    logger.info(f"Barycentering {infile}")
+
+    outfile = infile.replace(".evt", "_bary.evt")
+    logger.info(f"Output file: {outfile}")
+    print("bu")
+    hsp.barycorr(
+        infile=infile,
+        outfile=outfile,
+        ra=ra,
+        dec=dec,
+        ephem="JPLEPH.430",
+        refframe="ICRS",
+        clobber="yes",
+        orbitfiles=attorb,
+    )
+
+    return outfile
+
+
 @flow(flow_run_name="nu_barycenter_{obsid}")
 def barycenter_data(obsid, ra, dec, config, src=1):
     logger = get_run_logger()
@@ -270,12 +302,12 @@ def barycenter_data(obsid, ra, dec, config, src=1):
                 os.path.join(pipe_outdir, f"nu{obsid}{fpm}.attorb"),
                 ra=ra,
                 dec=dec,
-                # src=src,
+                src=src,
             )
 
 
 @flow
-def process_nustar_obsid(obsid, config=None, ra="NONE", dec="NONE"):
+def process_nustar_obsid(obsid, config=None, ra="NONE", dec="NONE", flags=None):
     config = DEFAULT_CONFIG if config is None else config
     logger = get_run_logger()
     logger.info(f"Processing NuSTAR observation {obsid}")
@@ -284,7 +316,7 @@ def process_nustar_obsid(obsid, config=None, ra="NONE", dec="NONE"):
     # splitdir = split_path.fn(obsid, config=config)
     pipedir = nu_pipeline_output_path.fn(obsid, config=config)
 
-    nu_run_l2_pipeline(obsid, config=config)
+    nu_run_l2_pipeline(obsid, config=config, flags=flags)
 
     splitdir = recover_spacecraft_science_data(obsid, config, wait_for=[nu_run_l2_pipeline])
     separate_sources([pipedir, splitdir], config, wait_for=[recover_spacecraft_science_data])

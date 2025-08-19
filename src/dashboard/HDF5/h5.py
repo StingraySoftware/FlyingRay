@@ -22,11 +22,11 @@ from datetime import datetime
 from PIL import Image
 import copy
 
-from dashboard.home.info import dashboard_info_text
-from dashboard.plotting.functions import HIDPlotter, get_global_hid_data, create_global_hid_plot 
-from dashboard.dataproducts.nicer_products import create_energy_band_lightcurves_nicer, create_pds_nicer
-from dashboard.dataproducts.nustar_products import create_energy_band_lightcurves_nustar, create_pds_nustar
-#from dashboard.dataproducts.rxte_products import create_energy_band_lightcurves_rxte, create_pds_nicer
+from src.dashboard.home.info import dashboard_info_text
+from src.dashboard.plotting.functions import HIDPlotter, get_global_hid_data, create_global_hid_plot 
+from src.dashboard.dataproducts.nicer_dataproducts import create_energy_band_lightcurves_nicer, create_pds_nicer
+from src.dashboard.dataproducts.nustar_dataproducts import create_energy_band_lightcurves_nustar, create_pds_nustar
+from src.dashboard.dataproducts.rxte_dataproducts import create_energy_band_lightcurves_rxte, create_pds_rxte
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,13 @@ MISSION = {
         "soft_Eband": (2, 4),
         "high_Eband": (4, 12),
         "full_Eband": (0.4, 12),
+    },
+    "rxte": {
+    "lc": create_energy_band_lightcurves_rxte,
+    "pds": create_pds_rxte,
+    "soft_Eband": (3, 6),
+    "high_Eband": (6, 15),
+    "full_Eband": (3, 20),
     },
 }
 
@@ -107,7 +114,8 @@ async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission
         logger.error("Received an empty list of event files to process.")
         return
 
-    obs_id_match = re.search(r'(\d{10,})', evt_filepath[0])
+    #obs_id_match = re.search(r'(\d{10,})', evt_filepath[0])
+    obs_id_match = re.search(r'(\d{10,}|\d{5}-\d{2}-\d{2}-\d{2})', evt_filepath[0])
     if not obs_id_match:
         logger.error(f"Could not extract OBSID from event file: {evt_filepath[0]}")
         return
@@ -129,10 +137,18 @@ async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission
             combined_events = ev_A.join(ev_B)
             pds_task = asyncio.to_thread(pds_func, ev_A, ev_B, obs_id)
             hid_task = asyncio.to_thread(calculate_hid_parameters, combined_events, obs_id, 2, outburst_id, mission)
+            
 
-        else: 
+        elif mission == 'nicer':
             events_data = EventList.read(evt_filepath[0], "hea", additional_columns=["DET_ID"])
             ndet = len(set(events_data.det_id))
+            lc_task = asyncio.to_thread(lc_func, events_data, obs_id)
+            pds_task = asyncio.to_thread(pds_func, events_data, obs_id)
+            hid_task = asyncio.to_thread(calculate_hid_parameters, events_data, obs_id, ndet, outburst_id, mission)
+
+        elif mission == 'rxte':
+            events_data = EventList.read(evt_filepath[0], "hea")
+            ndet = 1  # Treat the PCA instrument as a single detector
             lc_task = asyncio.to_thread(lc_func, events_data, obs_id)
             pds_task = asyncio.to_thread(pds_func, events_data, obs_id)
             hid_task = asyncio.to_thread(calculate_hid_parameters, events_data, obs_id, ndet, outburst_id, mission)
@@ -472,13 +488,15 @@ def create_h5_generator_tab(telescope_selector_widget):
             sizing_mode='stretch_width'
           )
         
-          card = pn.Card(
-              pn.pane.Markdown(f"### {source_name}", align='center'), 
-              plot_pane, 
-              button_controls,
-              css_classes=['plot-card-style'], 
-              width=480
-          )
+          card = pn.Card( 
+                  plot_pane,
+                  button_controls,
+                  header = f"### {source_name} ({telescope_selector_widget.value.upper()})",
+                  collapsible=False,           
+                  css_classes=['plot-card-style'], 
+                  width=480
+         )
+
 
           card_map[source_name] = card  # Store reference to the whole card
           new_cards_list.append(card)

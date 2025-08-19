@@ -38,3 +38,11 @@ Displays the fractional rms-squared normalized Power Density Spectrum in <em>Pow
 <hr>
 
 <h3><em>This dashboard is built with the following open-source projects:</em></h3>
+
+<ul>
+   <li><a href="{heasarc_pipeline_link}" target="_blank"><strong>heasarc_retrieve_pipeline</strong></a>: For programmatic data retrieval from the HEASARC archive.</li></strong>, developed by Matteo Bachetti.</li>
+    <li><strong><em>Dashboard & GUI:</em></strong> The entire graphical user interface is created using the <strong>Panel</strong> library from the <strong>HoloViz</strong> ecosystem.</li>
+    <li><strong><em>Interactive Plots:</em></strong> The Hardness-Intensity Diagrams are generated using <strong>Plotly</strong> for a rich, interactive experience.</li>
+    <li><strong><em>Static Plots:</em></strong> Light curves and power density spectra are generated as static PNGs using <strong>Matplotlib</strong>.</li>
+</ul>
+"""
