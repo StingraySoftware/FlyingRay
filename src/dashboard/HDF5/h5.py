@@ -462,8 +462,7 @@ def create_h5_generator_tab(telescope_selector_widget):
           source_name, mission = unique_key
           if plotter == "ERROR":
               card = pn.Card(f"Could not load data for **{source_name}**.", css_classes=['plot-card-style'], width=480)
-              new_cards_list.append(card)
-              card_map[source_name] = card
+              card_map[unique_key] = card
               new_cards_list.append(card)
               continue
 
@@ -626,12 +625,13 @@ def create_h5_generator_tab(telescope_selector_widget):
                 if not event or not event.new: return
                 try:
                     source_name = event.new['points'][0]['customdata'][1]
-                    if source_name not in plotter_map:
+                    unique_key = (source_name, mission)
+                    if unique_key not in plotter_map:
                         search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
                         found_files = glob.glob(search_pattern, recursive=True)
                         if found_files:
-                            plotter_map[source_name] = HIDPlotter(h5_file_path=found_files[0], name=source_name)
-                    plotter = plotter_map.get(source_name)
+                            plotter_map[unique_key] = HIDPlotter(h5_file_path=found_files[0], name=source_name)
+                    plotter = plotter_map.get(unique_key)
                     if plotter:
                         update_details_area(event, plotter)
                 except (IndexError, KeyError) as e:
