@@ -59,16 +59,19 @@ Running on SciServer
 --------------------
 
 #. **Create a New Container:**
+
    * Navigate to the "Compute" section and create a new container.
    * Set the "Compute Image" to ``HEASARCv6.34`` or above.
    * In "User Volumes", select ``scratch, Temporary Volume``.
    * In "Data Volumes", select ``HEASARC data``.
 
 #. **Clone the Dashboard:**
+
    * Open a terminal in your new container.
    * Clone the FlyingRay repository into your temporary storage folder: ``/home/idies/workspace/Temporary/<your_username>/``
 
 #. **Run the Dashboard:**
+
    * Navigate into the FlyingRay directory.
    * Execute the following command:
    
@@ -77,6 +80,7 @@ Running on SciServer
         panel serve flyingray.py --static-dirs assets=assets --port <4_digit_port_number> --allow-websocket-origin=*
 
 #. **Build the Correct URL:**
+
    * In the SciServer "Compute" section, click on your container's "Info" button to view the JSON details.
    * Copy the value associated with the ``"Args"`` key (e.g., ``dockervm16/e01ce51e-...``).
    * Construct your final URL like this: ``https://apps.sciserver.org/<paste_Args_here>/proxy/<your_port_number>/flyingray``
