@@ -371,6 +371,13 @@ def create_h5_generator_tab(telescope_selector_widget):
     def update_float_panel_details(event, plotter):
      try:
         obs_id = str(event.new['points'][0]['customdata'][0])
+        mission_name = "Unknown" # Default value
+        for key, plt_obj in plotter_map.items():
+            if plt_obj == plotter:
+                # key is a tuple like ('GX339-4', 'nicer')
+                source_name, mission_name = key
+                break
+
         
         # 1. Get all plot data first
         all_lc_plots = plotter.get_all_lightcurve_pngs(plotter.h5_file_path, obs_id)
@@ -416,7 +423,7 @@ def create_h5_generator_tab(telescope_selector_widget):
         # 4. Create and show the FloatPanel
         new_float_panel = pn.layout.FloatPanel(
             content_layout, 
-            name=f"*{telescope_selector_widget.value}* {plotter.name} - {obs_id}",
+            name=f"({mission_name.upper()}) {plotter.name} - {obs_id}",
             contained=False,
             position='center-top',
             status='normalized',
@@ -459,6 +466,7 @@ def create_h5_generator_tab(telescope_selector_widget):
           
         
       for unique_key, plotter in plotter_map.items():
+          
           source_name, mission = unique_key
           if plotter == "ERROR":
               card = pn.Card(f"Could not load data for **{source_name}**.", css_classes=['plot-card-style'], width=480)
@@ -640,7 +648,7 @@ def create_h5_generator_tab(telescope_selector_widget):
 
         combined_card = pn.Card(
             plot_pane,
-            title="Combined Hardness-Intensity Diagram",
+            title= f"Combined Hardness-Intensity Diagram ({mission.upper()})",
             css_classes=['plot-card-style'], 
             sizing_mode='stretch_width'
         )
