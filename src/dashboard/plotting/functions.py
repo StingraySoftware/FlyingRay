@@ -132,7 +132,7 @@ class HIDPlotter(param.Parameterized):
 
         if data_to_plot is None or data_to_plot.empty:
             return pn.pane.Markdown("### No valid data to plot.", width=450, height=400, align='center')
-            
+        data_to_plot.sort_values('Outburst', inplace=True) 
         data_to_plot['Outburst'] = data_to_plot['Outburst'].astype('category')
 
         fig = px.scatter(
