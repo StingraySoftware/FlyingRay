@@ -76,6 +76,13 @@ def save_dataframe_to_hdf5(group, df, dataset_name):
     dataset = group.create_dataset(dataset_name, (1,), dtype=dt)
     dataset[0] = csv_str
 
+def calculate_count_rate(events):
+    try:
+        total_exposure = np.sum(get_gti_lengths(events.gti))
+        return len(events.time) / total_exposure if total_exposure > 0 else 0.0
+    except Exception:
+        return 0.0
+
         
 def calculate_hid_parameters(events, obsid, no_of_detectors, outburst_id, mission):
     try:
@@ -98,27 +105,19 @@ def calculate_hid_parameters(events, obsid, no_of_detectors, outburst_id, missio
         return None
 
 
-def calculate_count_rate(events):
-    try:
-        total_exposure = np.sum(get_gti_lengths(events.gti))
-        return len(events.time) / total_exposure if total_exposure > 0 else 0.0
-    except Exception:
-        return 0.0
-
-
 async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission):
     """
     Processes a single observation, including its outburst ID, and saves the data.
     """
     if not evt_filepath:
         logger.error("Received an empty list of event files to process.")
-        return
+        return None, None, None
 
     #obs_id_match = re.search(r'(\d{10,})', evt_filepath[0])
     obs_id_match = re.search(r'(\d{10,}|\d{5}-\d{2}-\d{2}-\d{2})', evt_filepath[0])
     if not obs_id_match:
         logger.error(f"Could not extract OBSID from event file: {evt_filepath[0]}")
-        return
+        return None, None, None
     obs_id = obs_id_match.group(1)
     try:
         lc_func, pds_func = None, None
@@ -131,6 +130,17 @@ async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission
             file_b = next(f for f in evt_filepath if 'B_src1' in f)
             ev_A = EventList.read(file_a, "hea")
             ev_B = EventList.read(file_b, "hea")
+            if ev_A is None or ev_B is None:
+                logger.error(f"NO events in {obs_id} ")
+                return None, None, None
+
+            avg_rate_A = calculate_count_rate(ev_A)
+            avg_rate_B = calculate_count_rate(ev_B)
+
+            if avg_rate_A < 1.0 or avg_rate_B < 1.0:
+             logger.warning(f"Average count rate for OBSID {obs_id} (A:{avg_rate_A:.2f}, B:{avg_rate_B:.2f}). Dropping.") 
+             return None, None, None
+                
             lc_task = asyncio.to_thread(lc_func, ev_A, ev_B, obs_id)
 
             # For PDS and HID, i am joing the 2 evt files 
@@ -141,13 +151,30 @@ async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission
 
         elif mission == 'nicer':
             events_data = EventList.read(evt_filepath[0], "hea", additional_columns=["DET_ID"])
+            if events_data is None:
+                logger.error(f"NO events in {obs_id} ")
+                return None, None, None
+            avg_rate = calculate_count_rate(events_data)      
+            if avg_rate < 1.0:
+             logger.warning(f"Average count rate for OBSID {obs_id} is {avg_rate:.2f} (< 1). Dropping the observation.")
+             return None, None, None
+            
             ndet = len(set(events_data.det_id))
             lc_task = asyncio.to_thread(lc_func, events_data, obs_id)
             pds_task = asyncio.to_thread(pds_func, events_data, obs_id)
             hid_task = asyncio.to_thread(calculate_hid_parameters, events_data, obs_id, ndet, outburst_id, mission)
+        
 
         elif mission == 'rxte':
             events_data = EventList.read(evt_filepath[0], "hea")
+            if events_data is None:
+                logger.error(f"NO events in {obs_id} ")
+                return None, None, None
+            avg_rate = calculate_count_rate(events_data)
+            if avg_rate < 1.0:
+             logger.warning(f"Average count rate for OBSID {obs_id} is {avg_rate:.2f} (< 1). Dropping the observation.")
+             return None, None, None
+            
             ndet = 1  # Treat the PCA instrument as a single detector
             lc_task = asyncio.to_thread(lc_func, events_data, obs_id)
             pds_task = asyncio.to_thread(pds_func, events_data, obs_id)
