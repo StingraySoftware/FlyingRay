@@ -276,6 +276,7 @@ def create_h5_generator_tab(telescope_selector_widget):
     
     # Helper function to create HTML for any plot, avoiding repetition
 def create_h5_generator_tab(telescope_selector_widget):
+    view_state = {'mode': 'home'}
     plotter_map = {}
     plot_scale_state = {}
     card_map = {}
@@ -577,18 +578,23 @@ def create_h5_generator_tab(telescope_selector_widget):
 
     # --- 3. Update the final display area ---
       if not card_map:
-          plots_display_area.objects = [pn.pane.Markdown("### Select a source to add.", align='center')]
+          #plots_display_area.objects = [pn.pane.Markdown("### Select a source to add.", align='center')]
+          plots_display_area[:] = [pn.pane.Markdown("### Select a source to add.", align='center')]
       else:
-          plots_display_area.objects = new_cards_list
+          #plots_display_area.objects = new_cards_list
+          plots_display_area[:] = new_cards_list
     
     def plot_local_hids_callback(event, selected_sources, mission, hid_df=None):
-      plot_type_heading.object = "## *Individual HID Diagrams*" 
-
+      if view_state.get('mode') == 'global':
+        # If yes, clear the map to start fresh.
+        plotter_map.clear()
+        plot_scale_state.clear()
+      view_state['mode'] = 'local'
+      plot_type_heading.object = "## *Individual HID Diagrams*"
       plots_display_area.loading = True
       details_area.visible = False
-    
       if not selected_sources:
-        plots_display_area.objects = [pn.pane.Alert("Please select at least one source to plot.", alert_type='warning')]
+        plots_display_area[:] = [pn.pane.Alert("Please select at least one source to plot.", alert_type='warning')]
         plots_display_area.loading = False
         return
 
@@ -619,14 +625,17 @@ def create_h5_generator_tab(telescope_selector_widget):
 
       update_displayed_cards()
       plots_display_area.loading = False
-
+    
 
     def plot_global_hid_callback(event, selected_sources, mission):
+        view_state['mode'] = 'global'
         plot_type_heading.object = "## *Global HID Diagram*"
+        card_map.clear()
+        plot_pane_map.clear()
         plots_display_area.loading = True
         details_area.visible = False
-        plots_display_area.objects = []  # Explicitly clear objects
-
+       # plots_display_area.objects = []  # Explicitly clear objects
+        plots_display_area.clear() 
         logger.info("Resetting plotters to ensure full data is loaded for the global plot.")
         for source_name in selected_sources:
           try:
@@ -680,15 +689,18 @@ def create_h5_generator_tab(telescope_selector_widget):
             sizing_mode='stretch_width'
         )
         
-        plots_display_area.objects = [combined_card]
+        #plots_display_area.objects = [combined_card]
+        plots_display_area.append(combined_card)
         plots_display_area.loading = False
 
     #telescope_selector_widget.param.watch(lambda event: update_header(event.new, card_to_update=header_card), 'value')
     #update_header(telescope_selector_widget.value, card_to_update=header_card)
     
    # plots_display_area.objects = [pn.pane.Markdown("### Select one or more files and click a plot button.", align='center')]
+    #info_pane = pn.pane.Markdown(dashboard_info_text, sizing_mode='stretch_width')
+    #plots_display_area.objects = [info_pane]
     info_pane = pn.pane.Markdown(dashboard_info_text, sizing_mode='stretch_width')
-    plots_display_area.objects = [info_pane]
+    plots_display_area[:] = [info_pane]
     
     plots_and_details = pn.Column(
         plots_display_area,
