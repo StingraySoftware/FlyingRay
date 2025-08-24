@@ -1,5 +1,4 @@
 import logging
-import copy
 from io import BytesIO
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,9 +25,10 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                 logging.warning(f"No events in band {band_name} for {obs_id}. Skipping.")
                 continue
 
-            lc_full = Lightcurve.make_lightcurve(filtered_times, dt=dt, gti=events.gti, mjdref=events.mjdref)
-            lc = copy.copy(lc_full)
+            lc = Lightcurve.make_lightcurve(filtered_times, dt=dt, gti=events.gti, mjdref=events.mjdref)
             lc.apply_gtis()
+            lc.gti = lc.gti - lc.time[0]
+            lc.time = lc.time - lc.time[0]
 
             if lc.time is None or len(lc.time) == 0:
                 logging.warning(f"No data left after applying GTIs for {obs_id} band {band_name}. Skipping.")
@@ -44,14 +44,14 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                 if min_intensity > 0:
                     ratio = max_intensity / min_intensity
                     if ratio > 50:
-                        note_to_add = "NOTE:Instrumeental noice detected. Consider custom processing flags.\n (Max. Intensity/Min Intensity)>50"
+                        note_to_add = "NOTE:Instrumental noise detected. Consider custom processing flags.\n (Max.Intensity / Min.Intensity > 50)" 
+                                     
 
             all_gtis = sorted([tuple(g) for g in lc.gti], key=lambda x: x[0]) if lc.gti is not None else []
             plots_to_generate = {}
 
-            # RULE 1: For simple (<=2 GTIs) or very complex (>9 GTIs) data, use a single continuous plot.
-            # --- MODIFIED LOGIC: Changed from >5 to >9 to accommodate the new rules. ---
-            if len(all_gtis) <= 2 or len(all_gtis) > 10: # Changed from >9 to >10 to include 9 gaps case
+            # RULE 1: For simple (<=2 GTIs) or very complex (>10 GTIs) data, use a single continuous plot.
+            if len(all_gtis) <= 2 or len(all_gtis) > 10:
                 plots_to_generate['full_continuous_lc'] = {
                     'title': f"Light Curve {band_name}: {obs_id} (dt={dt}s)",
                     'plot_type': 'simple_continuous'
@@ -73,8 +73,8 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                 # CASE A: 4 to 7 gaps -> Split into 2 plots
                 if 4 <= num_large_gaps <= 7:
                     split_index = (len(gti_segments) + 1) // 2
-                    plots_to_generate['part1'] = {'segments': gti_segments[:split_index], 'title': f"Light Curve Part 1 {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
-                    plots_to_generate['part2'] = {'segments': gti_segments[split_index:], 'title': f"Light Curve Part 2 {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
+                    plots_to_generate['part1'] = {'segments': gti_segments[:split_index], 'title': f"Light Curve (Part 1) {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
+                    plots_to_generate['part2'] = {'segments': gti_segments[split_index:], 'title': f"Light Curve (Part 2) {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
 
                 # CASE B: 8 or 9 gaps -> Split into 3 plots
                 elif num_large_gaps in [8, 9]:
@@ -82,28 +82,35 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                     # Calculate split points for three nearly equal parts
                     idx1 = n // 3
                     idx2 = 2 * n // 3
-                    plots_to_generate['part1'] = {'segments': gti_segments[:idx1], 'title': f"Light Curve: {obs_id} (Part 1)", 'plot_type': 'broken_axis'}
-                    plots_to_generate['part2'] = {'segments': gti_segments[idx1:idx2], 'title': f"Light Curve: {obs_id} (Part 2)", 'plot_type': 'broken_axis'}
-                    plots_to_generate['part3'] = {'segments': gti_segments[idx2:], 'title': f"Light Curve: {obs_id} (Part 3)", 'plot_type': 'broken_axis'}
-                
-                # CASE C: fewer than 4 gaps -> create one single broken-axis plot
+                    plots_to_generate['part1'] = {'segments': gti_segments[:idx1], 'title': f"Light Curve (Part 1) {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
+                    plots_to_generate['part2'] = {'segments': gti_segments[idx1:idx2], 'title': f"Light Curve (Part 2) {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
+                    plots_to_generate['part3'] = {'segments': gti_segments[idx2:], 'title': f"Light Curve (Part 3) {band_name}: {obs_id} (dt={dt}s)", 'plot_type': 'broken_axis'}
+                    # CASE C: Fewer than 4 large gaps
                 else:
-                    plots_to_generate['full_light_curve'] = {'segments': gti_segments, 'title': f"Light Curve: {obs_id}", 'plot_type': 'broken_axis'}
-
+               # If there are NO large gaps at all, it's a continuous plot.
+                    if num_large_gaps == 0:
+                     plots_to_generate['full_continuous_lc'] = {
+                     'title': f"Light Curve {band_name}: {obs_id} (dt={dt}s)",
+                     'plot_type': 'simple_continuous'
+                      }
+              # Otherwise (1-3 large gaps), it's a single broken-axis plot.
+                    else:
+                     plots_to_generate['full_light_curve'] = {
+                     'segments': gti_segments,
+                     'title': f"Light Curve {band_name}: {obs_id} (dt={dt}s)",
+                     'plot_type': 'broken_axis'
+                     }
+                
             for plot_key, plot_info in plots_to_generate.items():
                 title = plot_info['title']
 
                 if plot_info['plot_type'] == 'simple_continuous':
                     fig, ax = plt.subplots()
-                    
-                    ax.plot(lc.time, lc.countrate, color='k', marker='o', markersize=2, linestyle='-', linewidth=0.1)
+                    ax.plot(lc.time, lc.countrate,'k-o', markersize=2, linewidth=0.1)
 
-                    if lc_full.gti is not None and len(lc_full.gti) > 1:
-                        for i in range(len(lc_full.gti) - 1):
-                            ax.axvspan(lc_full.gti[i, 1], lc_full.gti[i + 1, 0], alpha=0.3, color='red', zorder=0)
-                    
-                    if len(lc_full.time) > 1:
-                        ax.set_xlim(lc_full.time[0], lc_full.time[-1])
+                    if lc.gti is not None and len(lc.gti) > 1:
+                        for i in range(len(lc.gti) - 1):
+                            ax.axvspan(lc.gti[i, 1], lc.gti[i + 1, 0], alpha=0.3, color='red', zorder=0)                            
                         
                     ax.set_title(title)
                     ax.set_ylabel(r'Counts s$^{-1}$')
@@ -148,15 +155,9 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                       # 1. Determine the number of digits to show (e.g., last 4).
                       divisor = 100000
                       # 2. Calculate the "last digits" for the start and end times.
-                      last_digits_start = int(start_time) % divisor
-                      last_digits_end = int(end_time) % divisor
-                      # 3. Calculate the base value (the part of the number we are hiding).
-                      offset = int(start_time) - last_digits_start
-                      
-                      # 4. Format the two lines of the label.
-                      time_range_label = f"{last_digits_start} - {last_digits_end}"
-                      offset_label = f"(+{offset:.3e} s)"
-                      
+                      last_digits_start = int(start_time) % divisor if int(start_time) > 0 else 0
+                      last_digits_end = int(end_time)                       
+                      time_range_label = f"{last_digits_start} - {last_digits_end}"      
                       # 5. Combine and set the label for this specific panel.
                       full_label = f"{time_range_label}"
                       ax.set_xlabel(full_label, fontsize=9)
@@ -183,17 +184,15 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                     ymin, ymax = axes[0].get_ylim()
                     if ymax > 0:
                         axes[0].set_ylim(bottom= -0.15 * ymax, top=ymax * 1.15)
+                    if note_to_add:
+                        ax.text(0.9, 0.95, note_to_add,
+                        transform=ax.transAxes, ha='right', va='top',
+                        fontsize=9, color='red', style='italic',
+                        bbox={'facecolor': 'white', 'alpha': 0.7, 'pad': 4})
 
-                    
                     axes[0].set_ylabel(r'Counts s$^{-1}$')                    
                     fig.supxlabel('Time [s]')
                     fig.suptitle(title)    
-
-                if note_to_add:
-                                    ax.text(0.9, 0.95, note_to_add,
-                                    transform=ax.transAxes, ha='right', va='top',
-                                    fontsize=9, color='red', style='italic',
-                                    bbox={'facecolor': 'white', 'alpha': 0.7, 'pad': 4})
 
                 buf = BytesIO()
                 fig.savefig(buf, format='png', dpi=100)

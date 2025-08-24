@@ -1,5 +1,4 @@
 import logging
-import copy
 from io import BytesIO
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,9 +25,10 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                 logging.warning(f"No FPMA events in band {band_name} for {obs_id}.")
                 continue
                 
-            lc_a = Lightcurve.make_lightcurve(filtered_times_a, dt=dt, gti=events_a.gti)
-            lc_det_a = copy.copy(lc_a)
+            lc_det_a = Lightcurve.make_lightcurve(filtered_times_a, dt=dt, gti=events_a.gti)
             lc_det_a.apply_gtis()
+            lc_det_a.gti = lc_det_a.gti - lc_det_a.time[0]
+            lc_det_a.time = lc_det_a.time - lc_det_a.time[0]
 
             if lc_det_a.time is None or len(lc_det_a.time) == 0:
                 logging.warning(f"No data left after applying GTIs for {obs_id} band {band_name}. Skipping.")
@@ -41,9 +41,10 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                 logging.warning(f"No FPMB events in band {band_name} for {obs_id}.")
                 continue
                 
-            lc_b = Lightcurve.make_lightcurve(filtered_times_b, dt=dt, gti=events_b.gti)
-            lc_det_b = copy.copy(lc_b)
+            lc_det_b = Lightcurve.make_lightcurve(filtered_times_b, dt=dt, gti=events_b.gti)
             lc_det_b.apply_gtis()
+            lc_det_b.gti = lc_det_b.gti - lc_det_b.time[0]
+            lc_det_b.time = lc_det_b.time - lc_det_b.time[0]
 
             if lc_det_b.time is None or len(lc_det_b.time) == 0:
                 logging.warning(f"No data left after applying GTIs for {obs_id} band {band_name}. Skipping.")
@@ -131,11 +132,11 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                     ax.plot(lc_det_a.time, lc_det_a.countrate, color='dodgerblue', marker='o', markersize=2, linestyle='-', linewidth=0.1) 
                     ax.plot(lc_det_b.time, lc_det_b.countrate, color='orangered', marker='x', markersize=2, linestyle='-', linewidth=0.1)
 
-                    if lc_a.gti is not None and len(lc_a.gti) > 1:
-                        for i in range(len(lc_a.gti) - 1):
-                            ax.axvspan(lc_a.gti[i, 1], lc_a.gti[i + 1, 0], alpha=0.3, color='red', zorder=0)
-                    if len(lc_a.time) > 1:
-                        ax.set_xlim(lc_a.time[0], lc_a.time[-1])
+                    if lc_det_a.gti is not None and len(lc_det_a.gti) > 1:
+                        for i in range(len(lc_det_a.gti) - 1):
+                            ax.axvspan(lc_det_a.gti[i, 1], lc_det_a.gti[i + 1, 0], alpha=0.3, color='red', zorder=0)
+                    if len(lc_det_a.time) > 1:
+                        ax.set_xlim(lc_det_a.time[0], lc_det_a.time[-1])
    
                     ax.set_title(title)
                     ax.set_ylabel(r'Counts s$^{-1}$')
@@ -162,14 +163,14 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                         start_time, end_time = segment_gtis[0][0], segment_gtis[-1][1]
                         
                         # Plot FPMA segment
-                        mask_a = (lc_a.time >= start_time) & (lc_a.time <= end_time)
+                        mask_a = (lc_det_a.time >= start_time) & (lc_deta-a.time <= end_time)
                         if np.any(mask_a):
-                            ax.plot(lc_a.time[mask_a], lc_a.countrate[mask_a], color='dodgerblue', marker='o', markersize=2, linestyle='-', linewidth=0.1)
+                            ax.plot(lc_det_a.time[mask_a], lc_det_a.countrate[mask_a], color='dodgerblue', marker='o', markersize=2, linestyle='-', linewidth=0.1)
 
                         # Plot FPMB segment
-                        mask_b = (lc_b.time >= start_time) & (lc_b.time <= end_time)
+                        mask_b = (lc_det_b.time >= start_time) & (lc_det_b.time <= end_time)
                         if np.any(mask_b):
-                            ax.plot(lc_b.time[mask_b], lc_b.countrate[mask_b], color='orangered', marker='x', markersize=2, linestyle='-', linewidth=0.1)
+                            ax.plot(lc_det_b.time[mask_b], lc_det_b.countrate[mask_b], color='orangered', marker='x', markersize=2, linestyle='-', linewidth=0.1)
                         
 
                         if len(segment_gtis) > 1:
@@ -187,14 +188,9 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                       # 1. Determine the number of digits to show (e.g., last 4).
                         divisor = 100000
                       # 2. Calculate the "last digits" for the start and end times.
-                        last_digits_start = int(start_time) % divisor
-                        last_digits_end = int(end_time) % divisor
-                      # 3. Calculate the base value (the part of the number we are hiding).
-                        offset = int(start_time) - last_digits_start
-                      
-                      # 4. Format the two lines of the label.
+                        last_digits_start = int(start_time) % divisor if int(start_time) > 0 else 0
+                        last_digits_end = int(end_time)                       
                         time_range_label = f"{last_digits_start} - {last_digits_end}"
-                        offset_label = f"(+{offset:.3e} s)"
                       
                       # 5. Combine and set the label for this specific panel.
                         full_label = f"{time_range_label}"
@@ -222,17 +218,16 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                     ymin, ymax = axes[0].get_ylim()
                     if ymax > 0:
                         axes[0].set_ylim(bottom= -0.15 * ymax, top=ymax * 1.15)
+                    if note_to_add:
+                        ax.text(0.9, 0.95, note_to_add,
+                        transform=ax.transAxes, ha='right', va='top',
+                        fontsize=9, color='red', style='italic',
+                        bbox={'facecolor': 'white', 'alpha': 0.7, 'pad': 4})
 
                     
                     axes[0].set_ylabel(r'Counts s$^{-1}$')                    
                     fig.supxlabel('Time [s]')
                     fig.suptitle(title)    
-
-                if note_to_add:
-                                    ax.text(0.9, 0.95, note_to_add,
-                                    transform=ax.transAxes, ha='right', va='top',
-                                    fontsize=9, color='red', style='italic',
-                                    bbox={'facecolor': 'white', 'alpha': 0.7, 'pad': 4})
 
                 buf = BytesIO()
                 fig.savefig(buf, format='png', dpi=100)
@@ -246,7 +241,7 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
 
     return plots_data
 
-def create_pds_nustar(events_a, events_b, obs_id, segment_size=100.0, dt=1.0):
+def create_pds_nustar(events_a, events_b, obs_id, segment_size=100.0, dt=0.001):
     """
     Creates a NuSTAR PDS.
 
@@ -257,10 +252,8 @@ def create_pds_nustar(events_a, events_b, obs_id, segment_size=100.0, dt=1.0):
 
     """
     try:
-        t_start = min(events_a.time[0], events_b.time[0])
-        t_end = max(events_a.time[-1], events_b.time[-1])
-        lc_a = Lightcurve.make_lightcurve(events_a.time, dt=dt, tstart=t_start, tseg=t_end-t_start)
-        lc_b = Lightcurve.make_lightcurve(events_b.time, dt=dt, tstart=t_start, tseg=t_end-t_start)
+        lc_a = events_a.to_lc(dt)
+        lc_b = events_b.to_lc(dt)
 
         if lc_a.counts.sum() == 0 or lc_b.counts.sum() == 0:
             raise ValueError("Light curve is empty, cannot perform FAD.")
@@ -354,4 +347,3 @@ def create_pds_nustar(events_a, events_b, obs_id, segment_size=100.0, dt=1.0):
      plt.close(fig)
 
     return plot_data
-
