@@ -86,6 +86,7 @@ left_column = pn.Column(
     pn.Card(
         pipeline_controls,
         title="Pipeline & Plotting Controls",
+        collapsible=False,
         css_classes=['hid-card'],
         width=600
     ),
@@ -93,6 +94,7 @@ left_column = pn.Column(
     pn.Card(
         status_pane,
         title="Pipeline Status",
+        collapsible=False,
         css_classes=['hid-card'],
         width=600
     ),
