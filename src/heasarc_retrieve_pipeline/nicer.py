@@ -97,7 +97,7 @@ def ni_run_l2_pipeline(obsid, config, flags=None):
         "cldir": ev_dir,
         "clobber": True,
         "chatter": 5,
-        "geomag_path": "/FTP/caldb/data/gen/pcf/geomag/",
+        #"geomag_path": "/FTP/caldb/data/gen/pcf/geomag/",
         
     }
     if flags:
