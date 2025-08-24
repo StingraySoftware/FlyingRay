@@ -460,10 +460,9 @@ def load_local_source_data(event, outburst_widget, obsid_widget, name_widget, te
             # --- 3. Read and CLEAN data ---
             csv_bytes = hdf['hid/hid_table'][0]
             csv_str = csv_bytes.decode('utf-8')
-            hid_df = pd.read_csv(pd.io.common.StringIO(csv_str))
+            hid_df = pd.read_csv(pd.io.common.StringIO(csv_str), dtype={'ObsID': str})
 
             hid_df.dropna(subset=['ObsID', 'Outburst'], inplace=True)
-            hid_df['ObsID'] = hid_df['ObsID'].astype(str)
             hid_df['Outburst'] = pd.to_numeric(hid_df['Outburst'], errors='coerce')
             hid_df.dropna(subset=['Outburst'], inplace=True)
 
