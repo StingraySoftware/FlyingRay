@@ -234,44 +234,6 @@ async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission
         logger.error(f"Failed to process and save OBSID {obs_id}", exc_info=True)
         
         
-def create_h5_generator_tab(telescope_selector_widget):
-    plotter_map = {}
-    plot_scale_state = {}
-    card_map = {}
-    plot_pane_map = {}
-    plot_type_heading = pn.pane.Markdown("## *HOME*", margin=(15, 0, 0, 20)) 
-    header_card = pn.Card(
-        plot_type_heading,
-        css_classes=['hid-card'],
-        collapsible=True,
-        sizing_mode='stretch_width'
-    )
-
-    plots_display_area = pn.FlexBox(
-        sizing_mode='stretch_width',
-        min_height=480, 
-        justify_content='center',
-        align_items='start'
-    )
-    
-    float_panel_container = pn.Column(
-        sizing_mode='stretch_width',
-        visible= False
-    ) 
-   
-    details_html_pane = pn.pane.HTML(sizing_mode='stretch_width')
-    close_button = pn.widgets.Button(
-        name='Close Details',
-        button_type='primary'
-    )
-    
-    details_area = pn.Column(
-        details_html_pane,
-        pn.Row(close_button, align='center'),
-        visible=False,
-        sizing_mode='stretch_width'
-    )
-    close_button.on_click(lambda e: setattr(details_area, 'visible', False))
 
     
     # Helper function to create HTML for any plot, avoiding repetition
@@ -318,7 +280,7 @@ def create_h5_generator_tab(telescope_selector_widget):
     def create_details_html(obs_id, selected_row, plotter):
 
       style = "width: 400px; margin: 10px; text-align: center;"
-      pds_style = "width: 400px; margin: 10px auto; text-align: center;"
+      pds_style = "width: 400px; margin: 10px; text-align: center;"
 
     # 1. Get all available plot data first
       all_lc_plots = plotter.get_all_lightcurve_pngs(plotter.h5_file_path, obs_id)
@@ -358,12 +320,14 @@ def create_h5_generator_tab(telescope_selector_widget):
                 {all_plots_html}
             </div>
         """
+    # Case for 2 LCs -> LCs side-by-side, PDS below
       elif num_lcs == 2:
-        # Case for 2 LCs -> LCs side-by-side, PDS below
-        all_lcs_html = "".join(lc_html_list)
+    # Combine all three plots into a single string
+        all_plots_html = lc_html_list[0] + lc_html_list[1] + pds_html
         plots_html_block = f"""
-            <div style="display: flex; justify-content: center; flex-wrap: wrap;">{all_lcs_html}</div>
-            <div>{pds_html}</div>
+            <div style="display: flex; flex-wrap: wrap; justify-content: center; max-width: 850px; margin: auto;">
+            {all_plots_html}
+            </div>
         """
       else:
         # Case for 0 or 1 LC -> All side-by-side
