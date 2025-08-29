@@ -615,7 +615,7 @@ def create_h5_generator_tab(telescope_selector_widget):
                     source_name = event.new['points'][0]['customdata'][1]
                     unique_key = (source_name, mission)
                     if unique_key not in plotter_map:
-                        search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
+                        search_pattern = os.path.join(DATABASE_PATH, mission, '**', f"{source_name.replace(' ', '_')}.h5")
                         found_files = glob.glob(search_pattern, recursive=True)
                         if found_files:
                             plotter_map[unique_key] = HIDPlotter(h5_file_path=found_files[0], name=source_name)
