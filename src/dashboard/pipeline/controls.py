@@ -19,9 +19,7 @@ from src.config import DATABASE_PATH
 from src.heasarc_retrieve_pipeline.core import retrieve_heasarc_data_by_obsid
 from src.dashboard.HDF5.h5 import process_observation, create_h5_generator_tab
 
-TEST_MODE = True
-prefect_process = None
-
+TEST_MODE = False
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
