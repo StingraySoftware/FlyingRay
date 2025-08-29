@@ -1,0 +1,5 @@
+[paths]
+# Define the full path to the directory where you want to store your data.
+# Example for Linux/macOS: /home/user/my_flyingray_database
+# Example for Windows: C:\Users\user\Documents\my_flyingray_database
+database_directory = data

@@ -15,6 +15,7 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy.coordinates.name_resolve import NameResolveError
 
+from src.config import DATABASE_PATH
 from src.heasarc_retrieve_pipeline.core import retrieve_heasarc_data_by_obsid
 from src.dashboard.HDF5.h5 import process_observation, create_h5_generator_tab
 
@@ -369,7 +370,7 @@ def update_local_source_list(mission, local_widget, select_all_sources_checkbox)
     select_all_sources_checkbox.disabled = True
     select_all_sources_checkbox.value = False
 
-    main_data_dir = "data"
+    main_data_dir = DATABASE_PATH
     #main_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
     source_list = []
     mission_dir = os.path.join(main_data_dir, mission)
@@ -446,7 +447,7 @@ def load_local_source_data(event, outburst_widget, obsid_widget, name_widget, te
     outburst_widget.name = "Select Outburst(s)"
     selected_source = event.new[0]
     mission = tels_name_widget.value
-    h5_path = os.path.join("data", mission, f"{selected_source}.h5")
+    h5_path = os.path.join(DATABASE_PATH, mission, f"{selected_source}.h5")
 
     if os.path.exists(h5_path):
         #name_widget.value = selected_source
@@ -743,7 +744,7 @@ def create_pipeline_runner_tab(status_pane, plot_local_hids_callback, plot_globa
             
             raw_source_name = source_name.value
             base_outdir = raw_source_name.replace(" ", "_")
-            output_dir = os.path.join("data", tels_name.value)
+            output_dir = os.path.join(DATABASE_PATH, tels_name.value)
             os.makedirs(output_dir, exist_ok=True)
             hdf5_file_path = os.path.join(output_dir, f"{base_outdir}.h5")
             hdf5_file_path = os.path.abspath(hdf5_file_path)

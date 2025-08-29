@@ -1,4 +1,3 @@
-
 import panel as pn
 import param
 import h5py
@@ -12,6 +11,24 @@ import logging # IMPORT THE LOGGING MODULE
 import glob
 from matplotlib.ticker import MaxNLocator
 logger = logging.getLogger(__name__) # INITIALIZE LOGGER
+
+E_bands = {
+    "nustar": {
+        "soft_Eband": (3, 6),
+        "high_Eband": (6, 10),
+        "full_Eband": (3, 79),
+    },
+    "nicer": {
+        "soft_Eband": (2, 4),
+        "high_Eband": (4, 12),
+        "full_Eband": (0.4, 12),
+    },
+    "rxte": {
+        "soft_Eband": (3, 6),
+        "high_Eband": (6, 15),
+        "full_Eband": (3, 20),
+    },
+}
 
 class HIDPlotter(param.Parameterized):
     h5_file_path = param.String(default="", doc="Path to the HDF5 file.")
@@ -127,13 +144,18 @@ class HIDPlotter(param.Parameterized):
 
 
     @param.depends('hid_df')
-    def hid_plot(self, yscale='log', hid_df=None):
+    def hid_plot(self, mission, yscale='log', hid_df=None):
         data_to_plot = self.hid_df if hid_df is None else hid_df
 
         if data_to_plot is None or data_to_plot.empty:
             return pn.pane.Markdown("### No valid data to plot.", width=450, height=400, align='center')
         data_to_plot.sort_values('Outburst', inplace=True) 
         data_to_plot['Outburst'] = data_to_plot['Outburst'].astype('category')
+
+        bands = E_bands[mission]
+        soft_band = bands["soft_Eband"]
+        hard_band = bands["high_Eband"]
+        full_band = bands["full_Eband"]
 
         fig = px.scatter(
             data_to_plot,
@@ -142,8 +164,10 @@ class HIDPlotter(param.Parameterized):
             color='Outburst',
             color_continuous_scale='Viridis',
             hover_name='ObsID',
-            labels={'Hardness_Ratio': 'Hardness Ratio (4-12 keV / 2-4 keV)',
-                    'Normalized_Intensity': 'Normalized Intensity (0.4-12 keV) [cts/s/detector]'}
+            labels={
+                'Hardness_Ratio': f'Hardness Ratio ({hard_band[0]}-{hard_band[1]} keV / {soft_band[0]}-{soft_band[1]} keV)',
+                'Normalized_Intensity': f'Normalized Intensity ({full_band[0]}-{full_band[1]} keV) [cts/s/detector]'
+            }
         )
         fig.update_yaxes(type=yscale)
 
@@ -206,8 +230,7 @@ def get_global_hid_data(selected_sources, main_data_dir, mission):
     global_df = pd.concat(all_dfs, ignore_index=True)
     return global_df
 
-
-def create_global_hid_plot(global_df):
+def create_global_hid_plot(global_df, mission):
     """
     Generates an interactive global HID plot with a clean, groupable legend.
     """
@@ -215,6 +238,11 @@ def create_global_hid_plot(global_df):
         return pn.pane.Markdown("### No valid data to plot. Please select sources.")
 
     global_df['Outburst'] = global_df['Outburst'].astype('category')
+    
+    bands = E_bands[mission]
+    soft_band = bands["soft_Eband"]
+    hard_band = bands["high_Eband"]
+    full_band = bands["full_Eband"]
 
     fig = px.scatter(
         global_df,
@@ -227,7 +255,7 @@ def create_global_hid_plot(global_df):
         title="Global Hardness-Intensity Diagram"
     )
 
-    # --- NEW: Manually set the legend group and name for each trace ---
+    # Manually set the legend group and name for each trace ---
     # This correctly groups all outbursts under a single source name in the legend.
     for trace in fig.data:
         # Get the source name from the custom data associated with the trace
@@ -265,8 +293,8 @@ def create_global_hid_plot(global_df):
         height=700,
         legend_title_text='Sources',
         yaxis_type="log",
-        xaxis_title="Hardness Ratio (4-12 keV / 2-4 keV)",
-        yaxis_title="Normalized Intensity (0.4-12 keV) [cts/s/detector]"
+        xaxis_title=f'Hardness Ratio ({hard_band[0]}-{hard_band[1]} keV / {soft_band[0]}-{soft_band[1]} keV)',
+        yaxis_title=f'Normalized Intensity ({full_band[0]}-{full_band[1]} keV) [cts/s/detector]'
     )
 
     plotly_pane = pn.pane.Plotly(fig, config={'displaylogo': False}, sizing_mode='stretch_width')

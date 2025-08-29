@@ -22,6 +22,7 @@ from datetime import datetime
 from PIL import Image
 import copy
 
+from src.config import DATABASE_PATH
 from src.dashboard.home.info import dashboard_info_text
 from src.dashboard.plotting.functions import HIDPlotter, get_global_hid_data, create_global_hid_plot 
 from src.dashboard.dataproducts.nicer_dataproducts import create_energy_band_lightcurves_nicer, create_pds_nicer
@@ -453,7 +454,7 @@ def create_h5_generator_tab(telescope_selector_widget):
 
         # Initial plot creation
           current_scale = plot_scale_state.get(unique_key, 'log')
-          plot_pane = plotter.hid_plot(yscale=current_scale)
+          plot_pane = plotter.hid_plot(mission, yscale=current_scale)
           plot_pane_map[unique_key] = plot_pane
 
           def plot_click_factory(p):
@@ -484,7 +485,7 @@ def create_h5_generator_tab(telescope_selector_widget):
                   pane_to_update = plot_pane_map[src_name]
 
                 # 2. Re-generate ONLY the plot for this source
-                  new_figure = plotter_map[src_name].hid_plot(yscale=new_scale).object
+                  new_figure = plotter_map[src_name].hid_plot(mission=mission, yscale=new_scale).object
                   pane_to_update.object = new_figure
 
                 # 4. Update the button states on THIS CARD ONLY
@@ -548,7 +549,7 @@ def create_h5_generator_tab(telescope_selector_widget):
       for source_name in selected_sources:
         unique_key = (source_name, mission)
         try:
-            search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
+            search_pattern = os.path.join(DATABASE_PATH, mission, '**', f"{source_name.replace(' ', '_')}.h5")
             found_files = glob.glob(search_pattern, recursive=True)
             if found_files:
                 file_path = found_files[0]
@@ -583,7 +584,7 @@ def create_h5_generator_tab(telescope_selector_widget):
         logger.info("Resetting plotters to ensure full data is loaded for the global plot.")
         for source_name in selected_sources:
           try:
-             search_pattern = os.path.join("data", mission, '**', f"{source_name.replace(' ', '_')}.h5")
+             search_pattern = os.path.join(DATABASE_PATH, mission, '**', f"{source_name.replace(' ', '_')}.h5")
              found_files = glob.glob(search_pattern, recursive=True)
              if found_files:
                  unique_key = (source_name, mission)
@@ -594,7 +595,7 @@ def create_h5_generator_tab(telescope_selector_widget):
           except Exception as e:
             logger.error(f"Failed to reset plotter for {source_name}: {e}")
 
-        global_df = get_global_hid_data(selected_sources, "data", mission)
+        global_df = get_global_hid_data(selected_sources, DATABASE_PATH, mission)
 
         logger.info(f"get_global_hid_data returned a DataFrame with {len(global_df)} rows.")
 
@@ -605,7 +606,7 @@ def create_h5_generator_tab(telescope_selector_widget):
           return
 
         logger.info("Calling create_global_hid_plot")
-        plot_pane = create_global_hid_plot(global_df)
+        plot_pane = create_global_hid_plot(global_df, mission)
         
         if isinstance(plot_pane, pn.pane.Plotly):
             def handle_global_plot_click(event):
