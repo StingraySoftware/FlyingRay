@@ -25,7 +25,6 @@ env.bak
 # Ignore the entire data directory and any specific data files.
 # Data should not be stored in Git.
 data/
-*.h5
 *.fits
 *.evt
 
@@ -40,3 +39,7 @@ data/
 .DS_Store
 # Windows
 Thumbs.db
+
+# --- Local Configuration ---
+# Ignore user-specific configuration files.
+config.ini
