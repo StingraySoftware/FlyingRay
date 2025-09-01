@@ -37,21 +37,21 @@ class HIDPlotter(param.Parameterized):
     def __init__(self, hid_df=None, **params):
         super().__init__(**params)
         if hid_df is not None:
-            logger.info(f"--> HIDPlotter __init__: Using provided dataframe with {hid_df.shape[0]} rows.")
+            logger.info(f"HIDPlotter __init__: Using provided dataframe with {hid_df.shape[0]} rows.")
             self.hid_df = hid_df
         else:
-            logger.info("--> HIDPlotter __init__: No dataframe provided, loading from file.")
+            logger.info("HIDPlotter __init__: No dataframe provided, loading from file.")
             self.hid_df = self.get_hid_data(self.h5_file_path)
         
     @staticmethod
     def get_hid_data(h5_file_path):
         if not (h5_file_path and os.path.exists(h5_file_path)):
-            logger.warning(f"HID data file not found: {h5_file_path}") # Use logger
+            logger.warning(f"HID data file not found: {h5_file_path}") 
             return None
         try:
             with h5py.File(h5_file_path, 'r') as hdf:
                 if 'hid/hid_table' not in hdf:
-                    logger.warning(f"No 'hid/hid_table' found in HDF5 file: {h5_file_path}") # Use logger
+                    logger.warning(f"No 'hid/hid_table' found in HDF5 file: {h5_file_path}") 
                     return None
                 csv_str = hdf['hid/hid_table'][0].decode('utf-8')
                 df = pd.read_csv(io.StringIO(csv_str))
@@ -62,13 +62,13 @@ class HIDPlotter(param.Parameterized):
                         df['Normalized_Intensity'] = df['Intensity'] / df['No_of_detectors']
                     if 'No_of_detectors' not in df.columns:
                         df['No_of_detectors'] = np.nan
-                        logger.warning(f"'{h5_file_path}': 'No_of_detectors' column missing in HID data. Filling with NaN.") # Use logger
+                        logger.warning(f"'{h5_file_path}': 'No_of_detectors' column missing in HID data. Filling with NaN.")
                     if 'Normalized_Intensity' not in df.columns:
                         df['Normalized_Intensity'] = np.nan
-                        logger.warning(f"'{h5_file_path}': 'Normalized_Intensity' column missing in HID data. Filling with NaN.") # Use logger
+                        logger.warning(f"'{h5_file_path}': 'Normalized_Intensity' column missing in HID data. Filling with NaN.") 
 
-                    if not all(col in df.columns for col in required_cols): # Re-check after fallbacks
-                        logger.error(f"'{h5_file_path}': Missing critical columns even after fallback. Required: {required_cols}") # Use logger
+                    if not all(col in df.columns for col in required_cols): # Re-checking after fallbacks
+                        logger.error(f"'{h5_file_path}': Missing critical columns even after fallback. Required: {required_cols}") 
                         return None
 
                 for col in ['Hardness_Ratio', 'Intensity', 'Outburst', 'No_of_detectors', 'Normalized_Intensity']:
@@ -77,12 +77,8 @@ class HIDPlotter(param.Parameterized):
                 df['ObsID'] = df['ObsID'].astype(str)
                 return df if not df.empty else None
         except Exception as e:
-            logger.error(f"Error in get_hid_data for {h5_file_path}: {e}", exc_info=True) # Use logger with exc_info
+            logger.error(f"Error in get_hid_data for {h5_file_path}: {e}", exc_info=True) 
             return None
-
-# In your plotting.py file, inside the HIDPlotter class:
-
-    # ... (after the get_pds_png method) ...
 
     @staticmethod
     def get_all_lightcurve_pngs(h5_file_path, obs_id):
@@ -98,9 +94,9 @@ class HIDPlotter(param.Parameterized):
                     logger.warning(f"No group found for ObsID {obs_id} in {h5_file_path}")
                     return {}
                 
-                # Loop through all datasets in the observation's group
+                # Loops through all datasets in the observation's group
                 for item_name in obs_group:
-                    # Check if the dataset name indicates it's a light curve plot
+                    # Checks if the dataset name indicates it's a light curve plot
                     if item_name.startswith("lightcurve_"):
                         png_data = obs_group[item_name][()]
                         
@@ -113,9 +109,6 @@ class HIDPlotter(param.Parameterized):
         
         return lc_plots
 
-
-
-    # MODIFIED: Retrieve PDS PNG from HDF5
     @staticmethod
     def get_pds_png(h5_file_path, obs_id):
         try:
@@ -124,12 +117,9 @@ class HIDPlotter(param.Parameterized):
                 if dataset_path in hdf:
                     return hdf[dataset_path][()]
         except Exception as e:
-            logger.error(f"Error getting PDS for {obs_id}: {e}", exc_info=True) # Use logger
+            logger.error(f"Error getting PDS for {obs_id}: {e}", exc_info=True) 
         return None
 
-
-
-    # NEW METHOD: Retrieve PDS attributes from HDF5
     @staticmethod
     def get_pds_attributes(h5_file_path, obs_id):
         try:
@@ -139,17 +129,19 @@ class HIDPlotter(param.Parameterized):
                 if dataset_path in hdf:
                     return dict(hdf[dataset_path].attrs) # Return dictionary of attributes
         except Exception as e:
-            logger.error(f"Error getting PDS attributes for {obs_id}: {e}", exc_info=True) # Use logger
+            logger.error(f"Error getting PDS attributes for {obs_id}: {e}", exc_info=True) 
         return {} # Return empty dict on error or not found
-
-
+        
     @param.depends('hid_df')
-    def hid_plot(self, mission, yscale='log', hid_df=None):
-        data_to_plot = self.hid_df if hid_df is None else hid_df
+    def hid_plot(self, mission, xscale='linear', yscale='log', hid_df=None):
+        source_df = self.hid_df if hid_df is None else hid_df
+        if source_df is None or source_df.empty:
+            return pn.pane.Markdown("### No valid data to plot. Please select sources.")
 
-        if data_to_plot is None or data_to_plot.empty:
-            return pn.pane.Markdown("### No valid data to plot.", width=450, height=400, align='center')
-        data_to_plot.sort_values('Outburst', inplace=True) 
+        # Using a copy to avoid modifying the original dataframe
+        data_to_plot = source_df.copy()
+        
+        data_to_plot.sort_values('Outburst', inplace=True)
         data_to_plot['Outburst'] = data_to_plot['Outburst'].astype('category')
 
         bands = E_bands[mission]
@@ -157,22 +149,33 @@ class HIDPlotter(param.Parameterized):
         hard_band = bands["high_Eband"]
         full_band = bands["full_Eband"]
 
+        custom_data_cols = ['ObsID', 'Outburst', 'Hardness_Ratio', 'Intensity', 'No_of_detectors', 'Normalized_Intensity']
+
         fig = px.scatter(
             data_to_plot,
             x='Hardness_Ratio',
             y='Normalized_Intensity',
             color='Outburst',
-            color_continuous_scale='Viridis',
             hover_name='ObsID',
+            # Pass custom_data directly into the creation call
+            custom_data=custom_data_cols,
             labels={
                 'Hardness_Ratio': f'Hardness Ratio ({hard_band[0]}-{hard_band[1]} keV / {soft_band[0]}-{soft_band[1]} keV)',
                 'Normalized_Intensity': f'Normalized Intensity ({full_band[0]}-{full_band[1]} keV) [cts/s/detector]'
             }
         )
-        fig.update_yaxes(type=yscale)
+        
+        if yscale == 'log':
+           fig.update_yaxes(dict(type = yscale, dtick = 1))
+        else:
+           fig.update_yaxes(type = yscale)
+       
+        if xscale == 'log':
+            fig.update_xaxes(dict(type = xscale, dtick = 1))
+        else:
+            fig.update_xaxes(type = xscale)
 
         fig.update_traces(
-            customdata=data_to_plot[['ObsID', 'Outburst', 'Hardness_Ratio', 'Intensity', 'No_of_detectors', 'Normalized_Intensity']],
             marker=dict(size=8, line=dict(width=1, color='white')),
             hovertemplate=(
                 "<b>ObsID:</b> %{customdata[0]}<br>"
@@ -195,8 +198,6 @@ class HIDPlotter(param.Parameterized):
 
         return plotly_pane
 
-# Replace the old get_global_hid_data function in plotting.py with this one:
-
 def get_global_hid_data(selected_sources, main_data_dir, mission):
     """
     Aggregates HID data from multiple HDF5 files into a single DataFrame.
@@ -205,9 +206,7 @@ def get_global_hid_data(selected_sources, main_data_dir, mission):
     for source_name in selected_sources:
         search_pattern = os.path.join(main_data_dir, mission, '**', f"{source_name.replace(' ', '_')}.h5")
         found_files = glob.glob(search_pattern, recursive=True)
-
-        # --- THIS IS THE FIX ---
-        # 1. Check if the LIST is empty, not if the list "exists".
+        # 1. Checks if the LIST is empty, not if the list "exists".
         # 2. If files were found, take the FIRST element from the list.
         if not found_files:
             print(f"Warning: HDF5 file not found for {source_name}. Skipping.")
@@ -230,9 +229,9 @@ def get_global_hid_data(selected_sources, main_data_dir, mission):
     global_df = pd.concat(all_dfs, ignore_index=True)
     return global_df
 
-def create_global_hid_plot(global_df, mission):
+def create_global_hid_plot(global_df, mission, xscale='linear', yscale='log'):
     """
-    Generates an interactive global HID plot with a clean, groupable legend.
+    Generates an interactive global HID plot.
     """
     if global_df.empty:
         return pn.pane.Markdown("### No valid data to plot. Please select sources.")
@@ -252,18 +251,26 @@ def create_global_hid_plot(global_df, mission):
         symbol='Outburst',
         hover_name='ObsID',
         custom_data=['ObsID', 'source_name', 'Outburst', 'Intensity', 'Normalized_Intensity'],
-        title="Global Hardness-Intensity Diagram"
     )
+    if yscale == 'log':
+        fig.update_yaxes(type=yscale, dtick=1)
+    else:
+        fig.update_yaxes(type=yscale)
 
-    # Manually set the legend group and name for each trace ---
-    # This correctly groups all outbursts under a single source name in the legend.
+    if xscale == 'log':
+        fig.update_xaxes(type=xscale, dtick=1)
+    else:
+        fig.update_xaxes(type=xscale)
+
+    # Manually setting the legend group and name for each trace ---
+    # grouping all outbursts under a single source name in the legend.
     for trace in fig.data:
         # Get the source name from the custom data associated with the trace
         source_name = trace.customdata[0][1]
         trace.name = source_name
         trace.legendgroup = source_name
 
-    # --- Clean up the legend to show each source name only once ---
+    # --- Cleans up the legend to show each source name only once ---_-
     legend_names = set()
     fig.for_each_trace(
         lambda trace:
@@ -272,7 +279,7 @@ def create_global_hid_plot(global_df, mission):
             else legend_names.add(trace.name)
     )
 
-    # Update hover template and set a uniform marker size
+    # Updates hover template and set a uniform marker size
     fig.update_traces(
         hovertemplate=(
             "<b>Source:</b> %{customdata[1]}<br>"
@@ -290,11 +297,11 @@ def create_global_hid_plot(global_df, mission):
 
     # Final layout adjustments
     fig.update_layout(
-        height=700,
+        height=650,
         legend_title_text='Sources',
-        yaxis_type="log",
         xaxis_title=f'Hardness Ratio ({hard_band[0]}-{hard_band[1]} keV / {soft_band[0]}-{soft_band[1]} keV)',
-        yaxis_title=f'Normalized Intensity ({full_band[0]}-{full_band[1]} keV) [cts/s/detector]'
+        yaxis_title=f'Normalized Intensity ({full_band[0]}-{full_band[1]} keV) [cts/s/detector]',
+        margin=dict(b=0)
     )
 
     plotly_pane = pn.pane.Plotly(fig, config={'displaylogo': False}, sizing_mode='stretch_width')
