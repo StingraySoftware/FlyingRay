@@ -185,16 +185,14 @@ def create_energy_band_lightcurves_nustar(events_a, events_b, obs_id, dt=10):
                         ax.set_xticks([])
                         ax.yaxis.grid(False)
                                                 
-                      # 1. Determine the number of digits to show (e.g., last 4).
-                        divisor = 100000
-                      # 2. Calculate the "last digits" for the start and end times.
-                        last_digits_start = int(start_time) % divisor if int(start_time) > 0 else 0
-                        last_digits_end = int(end_time)                       
-                        time_range_label = f"{last_digits_start} - {last_digits_end}"
-                      
-                      # 5. Combine and set the label for this specific panel.
-                        full_label = f"{time_range_label}"
-                        ax.set_xlabel(full_label, fontsize=9)
+                        if i == 0:
+                            # For the FIRST panel, calculate duration and create the "0 - duration" label
+                            duration = end_time - start_time
+                            time_range_label = f"0 - {int(duration)}"
+                        else:
+                            # For all others panels, use the original, absolute time labels
+                            time_range_label = f"{int(start_time)} - {int(end_time)}"
+                        ax.set_xlabel(time_range_label, fontsize=9)
                       
                         if num_axes > 1:
                             if i == 0: ax.spines['right'].set_visible(False)

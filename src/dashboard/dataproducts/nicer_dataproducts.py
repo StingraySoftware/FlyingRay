@@ -145,22 +145,20 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
                             for j in range(len(segment_gtis) - 1):
                                 mid = (segment_gtis[j][1] + segment_gtis[j+1][0]) / 2.0
                                 ax.axvline(mid, color='red', linestyle='-', linewidth=0.8, alpha=0.7, zorder=0)
-
-                           
+   
                       ax.tick_params(direction='in', top=True, right=False)
                     
                       ax.set_xticks([])
                       ax.yaxis.grid(False)
-                                                
-                      # 1. Determine the number of digits to show (e.g., last 4).
-                      divisor = 100000
-                      # 2. Calculate the "last digits" for the start and end times.
-                      last_digits_start = int(start_time) % divisor if int(start_time) > 0 else 0
-                      last_digits_end = int(end_time)                       
-                      time_range_label = f"{last_digits_start} - {last_digits_end}"      
-                      # 5. Combine and set the label for this specific panel.
-                      full_label = f"{time_range_label}"
-                      ax.set_xlabel(full_label, fontsize=9)
+                        
+                      if i == 0:
+                            # For the FIRST panel, calculate duration and create the "0 - duration" label
+                            duration = end_time - start_time
+                            time_range_label = f"0 - {int(duration)}"
+                      else:
+                            # For all others panels, use the original, absolute time labels
+                            time_range_label = f"{int(start_time)} - {int(end_time)}"
+                      ax.set_xlabel(time_range_label, fontsize=9)
                       
                       if num_axes > 1:
                           if i == 0: ax.spines['right'].set_visible(False)
@@ -207,7 +205,6 @@ def create_energy_band_lightcurves_nicer(events, obs_id, dt=10):
     return plots_data
 
 def create_pds_nicer(events, obs_id, segment_size=50.0, dt=0.001):
-    
     try:
         total_exposure = np.sum(get_gti_lengths(events.gti))
         if total_exposure < segment_size:
@@ -224,33 +221,28 @@ def create_pds_nicer(events, obs_id, segment_size=50.0, dt=0.001):
         P_noise_Nicer = np.mean(noise_powers) if len(noise_powers) > 0 else 0
         y_vals_reb = (pds_reb.power - P_noise_Nicer) * pds_reb.freq
         y_vals_full = (pds.power - P_noise_Nicer) * pds.freq
+        valid_mask_full = (y_vals_full > 0) & np.isfinite(y_vals_full)
+        valid_mask_reb = (y_vals_reb > 0) & np.isfinite(y_vals_reb)
 
-        fig = plt.figure()
-        ax = plt.gca()
+        fig, ax = plt.subplots()
 
-        ax.plot(pds.freq, y_vals_full, drawstyle="steps-mid", color="grey", alpha=0.5)
-        ax.plot(pds_reb.freq, y_vals_reb, drawstyle="steps-mid", color="k")
+        ax.plot(pds.freq[valid_mask_full], y_vals_full[valid_mask_full], drawstyle="steps-mid", color="grey", alpha=0.5)
+        ax.plot(pds_reb.freq[valid_mask_reb], y_vals_reb[valid_mask_reb], drawstyle="steps-mid", color="k")
 
         ax.loglog()
         ax.set_xlabel("Frequency (Hz)")
         ax.set_ylabel(r"Power $\times$ Frequency [$(\mathrm{rms/mean})^2$]")
         ax.set_title(f"PDS {obs_id}")
 
-        x_lim_bottom = 1. / segment_size
+        x_lim_bottom = 1. / segment_size 
         x_lim_top = 1. / (2. * dt)
         ax.set_xlim(left=x_lim_bottom, right=x_lim_top)
 
-        M = len(noise_powers)
-
-        if M > 0 and np.any(y_vals_reb) and len(pds.freq[pds.freq > 0]) > 0:
-            lowest_freq = pds.freq[pds.freq > 0][0]
-
-            y_lower = ( P_noise_Nicer / np.sqrt(M)) * lowest_freq
-
-            y_upper = np.max(y_vals_reb)
-            
-            if y_upper > y_lower:
-                ax.set_ylim(bottom=y_lower, top=y_upper + (0.2 * y_upper))
+        filtered_y = y_vals_reb[valid_mask_reb]
+        if len(filtered_y) > 0:
+            y_min = np.min(filtered_y)
+            y_max = np.max(filtered_y)
+            ax.set_ylim(bottom=y_min * 0.5, top=y_max * 2.0)
 
         buf = BytesIO()
         fig.savefig(buf, format='png', dpi=100)
