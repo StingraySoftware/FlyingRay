@@ -227,9 +227,10 @@ async def process_observation(evt_filepath, hdf5_file_path, outburst_id, mission
         
 def create_h5_generator_tab(telescope_selector_widget):
     view_state = {'mode': 'home'}
-    plotter_map = {}
+    plotter_map = {} # this dict. holds the data plotters for each source
     plot_scale_state = {}
-    card_map = {}
+    global_plot_scale_state = {}
+    card_map = {} # this dict. holding the visible card objects
     plot_pane_map = {}
     plot_type_heading = pn.pane.Markdown("## *HOME*", margin=(15, 0, 0, 20)) 
     header_card = pn.Card(
@@ -348,6 +349,60 @@ def create_h5_generator_tab(telescope_selector_widget):
     </div>"""
       return final_html
 
+    def create_interactive_plot_controls(plot_pane, redraw_callable, state_dict, state_key):
+        current_scales = state_dict.get(state_key, {'x': 'linear', 'y': 'log'})
+        axises = pn.widgets.RadioBoxGroup(
+            name='Axis Select', options=['x-axis', 'y-axis'], value='y-axis', inline=True
+        )
+
+        linear_button = pn.widgets.Button(
+              name='Linear Scale', 
+              button_type='default',
+              width=120
+        )
+        
+        log_button = pn.widgets.Button(
+              name='Log Scale',
+              button_type='default', 
+              width=120
+        )
+        
+        def update_button_states(axis_widget, lin_btn, log_btn, scales_dict):
+         selected_axis_key = 'x' if axis_widget.value == 'x-axis' else 'y'
+         current_scale_for_axis = scales_dict[selected_axis_key]
+         lin_btn.disabled = (current_scale_for_axis == 'linear')
+         log_btn.disabled = (current_scale_for_axis == 'log')
+        update_button_states(axises, linear_button, log_button, current_scales)
+        def on_axis_change(event):
+         scales = state_dict.get(state_key, {'x': 'linear', 'y': 'log'})
+         update_button_states(event.obj, linear_button, log_button, scales)
+    
+        axises.param.watch(on_axis_change, 'value')
+        def scale_change_factory(key, new_scale_type, axis_widget, lin_btn, log_btn):
+         def scale_click(event):
+            scales = state_dict.get(key, {'x': 'linear', 'y': 'log'})
+            axis_to_change = 'x' if axis_widget.value == 'x-axis' else 'y'
+            
+            scales[axis_to_change] = new_scale_type
+            state_dict[key] = scales
+            
+            # Use the generic redraw_callable passed into the function
+            new_figure = redraw_callable(xscale=scales['x'], yscale=scales['y']).object
+            plot_pane.object = new_figure
+            
+            update_button_states(axis_widget, lin_btn, log_btn, scales)
+         return scale_click
+
+        linear_button.on_click(scale_change_factory(state_key, 'linear', axises, linear_button, log_button))
+        log_button.on_click(scale_change_factory(state_key, 'log', axises, linear_button, log_button))
+        
+        return pn.Column(
+        pn.Row(axises, align='center'),
+        pn.Row(linear_button, log_button, align='center'),
+        sizing_mode='stretch_width'
+        )
+
+
     def update_float_panel_details(event, plotter):
      try:
         obs_id = str(event.new['points'][0]['customdata'][0])
@@ -404,7 +459,6 @@ def create_h5_generator_tab(telescope_selector_widget):
             contained=False,
             position='center-top',
             status='normalized',
-           # theme="#f2f2f2",
             theme='#e9e9e9',
             width=850, 
             height=400,
@@ -444,57 +498,24 @@ def create_h5_generator_tab(telescope_selector_widget):
 
       new_cards_list = [] 
       for unique_key, plotter in plotter_map.items():
-          
           source_name, mission = unique_key
           if plotter == "ERROR":
               card = pn.Card(f"Could not load data for **{source_name}**.", collapsible=False, css_classes=['plot-card-style'], width=480)
-              card_map[unique_key] = card
               new_cards_list.append(card)
               continue
 
+          current_scales = plot_scale_state.get(unique_key, {'x': 'linear', 'y': 'log'})
+
         # Initial plot creation
-          current_scale = plot_scale_state.get(unique_key, 'log')
-          plot_pane = plotter.hid_plot(mission, yscale=current_scale)
+          plot_pane = plotter.hid_plot(mission, xscale=current_scales['x'], yscale=current_scales['y'])
           plot_pane_map[unique_key] = plot_pane
+          def redraw_local_plot(xscale, yscale):
+            return plotter.hid_plot(mission=mission, xscale=xscale, yscale=yscale)
 
-          def plot_click_factory(p):
-            return lambda event: update_float_panel_details(event, p)
-        
-          if isinstance(plot_pane, (pn.pane.Plotly, pn.pane.Matplotlib)):
-              plot_pane.param.watch(plot_click_factory(plotter), 'click_data')
-
-          linear_button = pn.widgets.Button(
-              name='Linear Scale', 
-              button_type='default',
-              width=120
+        # Call the helper to get the interactive controls
+          interactive_controls = create_interactive_plot_controls(
+            plot_pane, redraw_local_plot, plot_scale_state, unique_key
           )
-          log_button = pn.widgets.Button(
-              name='Log Scale',
-              button_type='default', 
-              width=120
-          )
-
-          linear_button.disabled = (current_scale == 'linear')
-          log_button.disabled = (current_scale == 'log')
-
-          def scale_change_factory(src_name, new_scale, lin_btn, log_btn):
-              def scale_click(event):
-                  logger.info(f"--- [Targeted Update] State for '{src_name}' changed to '{new_scale}'.")
-                  # 1. Update the state
-                  plot_scale_state[src_name] = new_scale
-                  pane_to_update = plot_pane_map[src_name]
-
-                # 2. Re-generate ONLY the plot for this source
-                  new_figure = plotter_map[src_name].hid_plot(mission=mission, yscale=new_scale).object
-                  pane_to_update.object = new_figure
-
-                # 4. Update the button states on THIS CARD ONLY
-                  lin_btn.disabled = (new_scale == 'linear')
-                  log_btn.disabled = (new_scale == 'log')
-              return scale_click
-
-          linear_button.on_click(scale_change_factory(unique_key, 'linear', linear_button, log_button))
-          log_button.on_click(scale_change_factory(unique_key, 'log', linear_button, log_button))
 
           remove_button = pn.widgets.Button(name='Remove', button_type='danger', width=120)
 
@@ -506,27 +527,31 @@ def create_h5_generator_tab(telescope_selector_widget):
               return remove_click
         
           remove_button.on_click(remove_source_factory(unique_key))
-
-          button_controls = pn.Column(
-            pn.Row(linear_button, log_button, align='center'),
-            pn.Row(remove_button, align='center'),
-            sizing_mode='stretch_width'
+          all_controls = pn.Column(
+              interactive_controls,
+              pn.Row(remove_button, align='center'),
+              sizing_mode='stretch_width'
           )
         
           card = pn.Card( 
                   plot_pane,
-                  button_controls,
+                  all_controls,
                   header = f"### {source_name} ({mission.upper()})",
                   collapsible=False,           
                   css_classes=['plot-card-style'], 
                   width=480
-         )
+          )
 
-          card_map[unique_key] = card  # Store reference to the whole card
+          def plot_click_factory(p):
+            return lambda event: update_float_panel_details(event, p)
+        
+          if isinstance(plot_pane, (pn.pane.Plotly, pn.pane.Matplotlib)):
+            plot_pane.param.watch(plot_click_factory(plotter), 'click_data')
+
           new_cards_list.append(card)
 
     # --- 3. Update the final display area ---
-      if not card_map:
+      if not new_cards_list:
           plots_display_area[:] = [pn.pane.Markdown("### Select a source to add.", align='center')]
       else:
           plots_display_area[:] = new_cards_list
@@ -563,7 +588,7 @@ def create_h5_generator_tab(telescope_selector_widget):
                     name=source_name,
                     hid_df=hid_df 
                 )
-                plot_scale_state.setdefault(unique_key, 'log')
+                plot_scale_state.setdefault(unique_key, {'x': 'linear', 'y': 'log'})
             else:
                 plotter_map[unique_key] = "ERROR"     
         except Exception as e:
@@ -604,10 +629,19 @@ def create_h5_generator_tab(telescope_selector_widget):
           plots_display_area.objects.append(alert_pane)
           plots_display_area.loading = False
           return
+        global_key = 'global_hid'
+        current_scales = global_plot_scale_state.get(global_key, {'x': 'linear', 'y': 'log'})
 
-        logger.info("Calling create_global_hid_plot")
-        plot_pane = create_global_hid_plot(global_df, mission)
-        
+        plot_pane = create_global_hid_plot(
+        global_df, mission, xscale=current_scales['x'], yscale=current_scales['y']
+        )
+        def redraw_global_plot(xscale, yscale):
+         return create_global_hid_plot(global_df, mission, xscale=xscale, yscale=yscale)
+
+    # Call the SAME helper to get the interactive controls
+        interactive_controls = create_interactive_plot_controls(
+        plot_pane, redraw_global_plot, global_plot_scale_state, global_key
+        )        
         if isinstance(plot_pane, pn.pane.Plotly):
             def handle_global_plot_click(event):
                 if not event or not event.new: return
@@ -628,9 +662,10 @@ def create_h5_generator_tab(telescope_selector_widget):
 
         combined_card = pn.Card(
             plot_pane,
-            title= f"Combined Hardness-Intensity Diagram ({mission.upper()})",
+            interactive_controls,
+            title= f"Global Hardness-Intensity Diagram ({mission.upper()})",
             collapsible=False,
-            css_classes=['plot-card-style'], 
+            css_classes=['hid-card'], 
             sizing_mode='stretch_width'
         )
         
