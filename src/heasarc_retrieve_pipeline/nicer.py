@@ -96,10 +96,12 @@ def ni_run_l2_pipeline(obsid, config, flags=None):
         "indir": datadir,
         "cldir": ev_dir,
         "clobber": True,
-        "chatter": 5,
-        #"geomag_path": "/FTP/caldb/data/gen/pcf/geomag/",
-        
+        "chatter": 5,  
     }
+    
+    if "SCISERVER_USER_ID" in os.environ:
+        params["geomag_path"] = "/FTP/caldb/data/gen/pcf/geomag/"
+        
     if flags:
         params.update(flags)
     command = ["nicerl2"]
